@@ -2,6 +2,8 @@
 import json
 import sys
 
+if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8")
+
 if sys.version_info < (3, 11):
     print(json.dumps({"status": "blocked", "exit_code": 2, "issues": ["需要 Python 3.11 或更高版本"]}, ensure_ascii=False))
     raise SystemExit(2)

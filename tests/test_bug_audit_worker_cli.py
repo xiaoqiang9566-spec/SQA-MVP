@@ -37,3 +37,11 @@ class CLITests(unittest.TestCase):
             other = Path(tmp) / "business"; other.mkdir(); (other / "untouched").write_text("keep")
             self.assertEqual(self.call("demo", "--data-dir", str(other)).returncode, 2)
             self.assertEqual((other / "untouched").read_text(), "keep")
+
+    def test_json_stdout_is_utf8_even_under_windows_legacy_encoding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, "PYTHONIOENCODING": "gbk"}
+            result = subprocess.run([sys.executable, str(ENTRY), "demo", "--data-dir", str(Path(tmp) / "演示")], capture_output=True, env=env)
+            self.assertEqual(result.returncode, 0)
+            value = json.loads(result.stdout.decode("utf-8"))
+            self.assertIn("合成演示", value["notice"])

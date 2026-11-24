@@ -12,7 +12,7 @@ from store import Store
 from .config import ConfigError, require
 from .history import SHANGHAI, timestamp
 from .journal import Journal, JournalError, digest, encoded
-from .model import ModelClient
+from .model import ModelClient, redact
 from .rules import RULE_VERSION, assemble_findings, build_facts, deterministic_checks, rules_digest
 from .tp import TPClient
 from .feishu import FeishuClient
@@ -63,6 +63,14 @@ class Worker:
         # 内容寻址：文件已落地但 DB 更新前中断时，旧检查点仍完整可恢复。
         directory = self.config.runs_dir / str(run_id)
         directory.mkdir(parents=True, exist_ok=True)
+        def scrub(value):
+            if isinstance(value, dict):
+                for key in value: value[key] = scrub(value[key])
+            elif isinstance(value, list):
+                for index in range(len(value)): value[index] = scrub(value[index])
+            elif isinstance(value, str): return redact(value)
+            return value
+        scrub(state)
         content = encoded(state).encode("utf-8")
         sha = hashlib.sha256(content).hexdigest()
         path = directory / (sha + ".json")
@@ -90,9 +98,15 @@ class Worker:
         except ValueError: raise JournalError("检查点格式无效") from None
         return job, state
 
-    def run(self, mode, window=None):
+    def run(self, mode, window=None, source_run_id=None):
         require(mode in {"demo", "dry_run", "apply"}, "运行模式无效")
         require((mode == "demo") == self.demo, "demo 只能使用离线演示适配器")
+        if source_run_id is not None:
+            require(mode == "apply" and window is None, "只读计划只能作为独立 apply 的来源，不能另设窗口")
+            source = self.audit.get_run(source_run_id)
+            source_job = self.journal.job(source_run_id)
+            require(source_job["mode"] == "dry_run" and source["scope"].get("scope_hash") == self.scope_hash, "来源须为同一业务范围的只读计划")
+            window = source["window"]
         if window is None:
             end = datetime.now(SHANGHAI)
             window = {"start": end.replace(hour=0, minute=0, second=0, microsecond=0).isoformat(), "end": end.isoformat()}
@@ -106,7 +120,7 @@ class Worker:
             run = self.audit.begin_run(key, window, {"project": scope["project_name"], "teams": scope["team_names"], "scope_hash": self.scope_hash}, RULE_VERSION)
             with self.store.connection() as db:
                 exists = db.execute("SELECT 1 FROM bug_audit_worker_jobs WHERE run_id=?", (run["id"],)).fetchone()
-            if not exists: self._save(run["id"], mode, run["window"], {"model_calls": 0, "findings": []}, "collect")
+            if not exists: self._save(run["id"], mode, run["window"], {"model_calls": 0, "findings": [], "source_run_id": source_run_id}, "collect")
             return self._continue(run["id"])
 
     def resume(self, run_id):
@@ -160,6 +174,13 @@ class Worker:
             report["csv_base64"] = base64.b64encode(report.pop("csv_bytes")).decode("ascii")
             state["report"] = report
             save("notify" if mode == "apply" else "planned")
+            for name, content in (("报告.md", report["markdown"].encode("utf-8")), (report["filename"], base64.b64decode(report["csv_base64"]))):
+                target = self.config.runs_dir / str(run_id) / name
+                temporary = target.with_name(uuid.uuid4().hex + ".tmp")
+                with temporary.open("xb") as handle:
+                    if os.name != "nt": os.chmod(temporary, 0o600)
+                    handle.write(content); handle.flush(); os.fsync(handle.fileno())
+                temporary.replace(target)
         if mode == "apply":
             self.feishu.recover(run_id, self.journal)
             report = dict(state["report"])
@@ -194,7 +215,8 @@ class Worker:
                 "status": "complete" if success and job["mode"] == "apply" else "planned" if success else "partial",
                 "exit_code": 0 if success else 3, "stage": job["stage"], "issues": extra_issues or [],
                 "counts": {"bugs": len(run["items"]), "fields": len(fields), "pending": sum(not f["ready"] for f in fields),
-                           "verified": sum(f["status"] == "verified" for f in fields)}, "model_calls": state.get("model_calls", 0)}
+                           "verified": sum(f["status"] == "verified" for f in fields)}, "model_calls": state.get("model_calls", 0),
+                "report_directory": str(self.config.runs_dir / str(run_id))}
 
     def reconcile(self, run_id, online=False, receipts=None):
         require(not receipts or online, "人工回执必须在线核验")

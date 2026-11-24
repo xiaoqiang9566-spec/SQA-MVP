@@ -7,6 +7,8 @@ from .config import ConfigError, doctor, load_config
 
 
 def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"): sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Bug 审计独立 Worker（Python 3.11+）")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("doctor", "run", "resume", "reconcile"):
@@ -14,6 +16,7 @@ def main(argv=None):
         sub.add_argument("--config", default=str(Path(__file__).parent / "config.example.toml"))
         sub.add_argument("--live", action="store_true")
         if name in {"run", "resume"}: sub.add_argument("--apply", action="store_true")
+        if name == "run": sub.add_argument("--from-run", type=int, help="保留只读计划窗口；创建独立 apply 并重新取证审计")
         if name in {"resume", "reconcile"}: sub.add_argument("--run-id", type=int, required=True)
         if name == "reconcile": sub.add_argument("--receipts", help="operation_key 到 message_id 的 JSON 文件；只读在线核验")
     sub = commands.add_parser("demo")
@@ -41,7 +44,7 @@ def main(argv=None):
             else:
                 from .engine import Worker
                 worker = Worker(cfg)
-                if args.command == "run": result = worker.run("apply" if args.apply else "dry_run")
+                if args.command == "run": result = worker.run("apply" if args.apply else "dry_run", source_run_id=args.from_run)
                 elif args.command == "resume":
                     job = worker.journal.job(args.run_id)
                     if (job["mode"] == "apply") != args.apply: raise ConfigError("恢复模式必须与原运行一致；apply 恢复需要 --apply")

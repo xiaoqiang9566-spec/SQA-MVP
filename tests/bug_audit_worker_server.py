@@ -50,7 +50,7 @@ class WorkerServer:
         self.env.stop();self.server.shutdown();self.server.server_close();self.thread.join(3);self.temp.cleanup()
 
     def bug(self):
-        return {"id":1,"name":"Synthetic cross-feature reset","description":"Firmware 1.0, cross-feature reset; reproduce using navigation; expected no reset.",
+        return {"id":1,"name":"Synthetic cross-feature reset","description":"Firmware 1.0, cross-feature reset; reproduce using navigation; expected no reset."+getattr(self,"extra_body",""),
                 "createDate":"2026-11-23T12:00:00+08:00","stateName":self.state,"severityName":"Major", "projectId":1,
                 "assignedTeamIds":[2],"assignedTeams":["A"],"featureId":None,
                 "customValues":{"customFields":[{"name":name,"value":value} for name,value in self.fields.items()]}}

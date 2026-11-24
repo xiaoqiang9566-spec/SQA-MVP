@@ -118,5 +118,23 @@ class EngineTests(unittest.TestCase):
         self.remote.features[0]["projectId"] = 1
         self.assertEqual(client.feature_details([25], [{"id": 25, "projectId": 1}])[0]["description"], "Route")
 
+    def test_apply_from_read_only_plan_creates_new_record_and_rechecks(self):
+        first = self.worker.run("dry_run", WINDOW)
+        self.remote.state = "Fixed"
+        applied = self.worker.run("apply", source_run_id=first["run_id"])
+        self.assertNotEqual(first["run_id"], applied["run_id"])
+        self.assertEqual(first["window"], applied["window"])
+        self.assertEqual(self.worker.audit.get_run(applied["run_id"])["items"][0]["snapshot"]["state"], "Fixed")
+        self.assertEqual(self.remote.counts[("POST", "/v1/responses")], 2)
+
+    def test_checkpoint_redacts_sensitive_evidence_without_breaking_preflight(self):
+        self.remote.extra_body = " email: person@example.com; api_key=not-a-real-secret"
+        result = self.worker.run("apply", WINDOW)
+        self.assertEqual(result["exit_code"], 0, result)
+        for path in self.remote.config.runs_dir.rglob("*.json"):
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("not-a-real-secret", text)
+            self.assertNotIn("person@example.com", text)
+
 
 if __name__ == "__main__": unittest.main()

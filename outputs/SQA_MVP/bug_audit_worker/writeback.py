@@ -64,7 +64,7 @@ class Writeback:
             try:
                 refreshed=self.tp.refresh([bid],bundle["window"])
                 current=next(i for i in refreshed["items"] if i["bug_id"]==bid)
-                changed=(business_fingerprint(current)!=business_fingerprint(before)
+                changed=(business_fingerprint(current)!=before.get("source_hash",business_fingerprint(before))
                          or refreshed["completeness"]!="complete" or digest(refreshed["options"])!=digest(bundle["options"]))
             except (TransportError,ConfigError,StopIteration):
                 current=None;changed=True
