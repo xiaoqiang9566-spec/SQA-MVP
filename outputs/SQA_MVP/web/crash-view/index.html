@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light">
+  <title>崩溃趋势对比</title><link rel="stylesheet" href="./styles.css"><script type="module" src="./app.mjs"></script>
+</head>
+<body>
+<main class="shell">
+  <header class="page-header">
+    <div><p class="eyebrow">SUUNTO · FIRMWARE QUALITY</p><h1>崩溃趋势对比</h1></div>
+    <div id="snapshot-badge" class="snapshot"><span class="snapshot-dot" aria-hidden="true"></span>数据截止 <strong id="snapshot-date">载入中</strong><span>UTC</span></div>
+  </header>
+  <section class="filter-panel" aria-label="筛选范围">
+    <div class="section-label"><h2>筛选范围</h2><span>同一维度可多选 · 留空表示全部</span><button id="reset-filters" class="text-button" type="button" disabled>重置筛选</button></div>
+    <div id="filter-fields" class="filter-grid"></div>
+    <p id="filter-summary" class="filter-summary" aria-live="polite"></p>
+    <p id="preference-notice" class="metric-note" role="status">默认查看 Race 3S 的 2.57.62 和 2.57.64；更新后保留当前浏览器的日期与筛选。</p>
+  </section>
+  <section class="comparison-panel" aria-label="对比和时间设置">
+    <div class="setting-row"><span class="setting-label">按什么对比</span><div class="segmented" role="group" aria-label="对比维度">
+      <button type="button" class="segment is-active" data-dimension="firmware_version" aria-pressed="true">固件版本</button>
+      <button type="button" class="segment" data-dimension="user_region" aria-pressed="false">地区</button>
+      <button type="button" class="segment" data-dimension="model_name" aria-pressed="false">手表机型</button>
+      <button type="button" class="segment" data-dimension="mobile_platform" aria-pressed="false">手机平台</button>
+      <button type="button" class="segment" data-dimension="app_version" aria-pressed="false">Suunto App 版本</button>
+    </div></div>
+    <div class="setting-row time-settings"><span class="setting-label">时间设置</span>
+      <label class="compact-field">日期范围<select id="date-preset"><option value="30">最近 30 天</option><option value="90">最近 90 天</option><option value="all" selected>全部数据</option><option value="custom">自定义</option></select></label>
+      <label class="compact-field">开始（UTC）<input id="start-date" type="date" required></label>
+      <label class="compact-field">结束（UTC）<input id="end-date" type="date" required></label>
+      <div class="segmented period-switch" role="group" aria-label="统计粒度">
+        <button type="button" class="segment" data-period="day" aria-pressed="false">日</button>
+        <button type="button" class="segment is-active" data-period="week" aria-pressed="true">周</button>
+        <button type="button" class="segment" data-period="month" aria-pressed="false">月</button>
+        <button type="button" class="segment" data-period="quarter" aria-pressed="false">季度</button>
+      </div>
+    </div>
+    <p id="date-error" class="error-message" role="alert" hidden></p>
+  </section>
+  <section aria-label="趋势曲线">
+    <div class="chart-heading"><h2 id="chart-title">固件版本对比</h2><span id="series-count"></span></div>
+    <p id="chart-summary" class="chart-summary" aria-live="polite"></p>
+    <div class="chart-frame"><svg id="trend-chart" class="trend-chart" role="group" aria-label="崩溃设备日占比趋势"></svg></div>
+    <div id="chart-legend" class="legend" aria-label="点击图例显示或隐藏曲线"></div>
+    <p id="metric-note" class="metric-note">正在读取快照的统计口径与覆盖平台…</p>
+  </section>
+  <section class="table-section" aria-label="曲线数据">
+    <div class="section-label"><h2>周期横向对比</h2><span>表头与图例颜色一致 · 空心标记表示部分周期</span></div>
+    <div class="table-wrap" role="region" aria-label="周期横向对比表，可横向滚动" tabindex="0">
+      <table id="comparison-table" aria-describedby="chart-summary"><caption class="sr-only">各周期崩溃设备日占比</caption><thead id="comparison-head"></thead><tbody id="trend-table"></tbody></table>
+    </div>
+    <details id="count-details" class="count-details"><summary>查看计数与覆盖明细</summary>
+      <div class="table-wrap" role="region" aria-label="分子分母和覆盖明细，可横向滚动" tabindex="0">
+        <table><caption class="sr-only">曲线计数和覆盖明细</caption><thead><tr><th scope="col">周期（UTC）</th><th scope="col">对比组</th><th scope="col">崩溃设备日占比</th><th scope="col">匹配崩溃设备日</th><th scope="col" data-covered-label>已覆盖平台同步设备日</th><th scope="col">全平台同步设备日</th><th scope="col">已查询 / 选中 / 周期日数</th><th scope="col">状态</th></tr></thead><tbody id="count-table"></tbody></table>
+      </div>
+    </details>
+  </section>
+  <section id="signature-section" class="table-section signature-section" aria-labelledby="signature-title" aria-busy="true" tabindex="-1">
+    <div class="section-label"><h2 id="signature-title">崩溃类型</h2><span>随筛选与可见图例联动 · 点击或按 Enter / Space 激活曲线点可定位周期</span></div>
+    <div class="signature-controls">
+      <label class="compact-field signature-search-field">签名搜索<input id="signature-search" type="search" placeholder="例如 A379:Flasher.cpp" disabled></label>
+      <label class="compact-field">类型周期<select id="signature-period" disabled><option value="all">全部日期</option></select></label>
+    </div>
+    <p id="signature-status" class="metric-note" role="status" aria-live="polite" data-state="loading">类型数据加载中：等待趋势数据…</p>
+    <button id="signature-retry" class="text-button" type="button" hidden>重试加载类型数据</button>
+    <p id="signature-summary" class="chart-summary" aria-live="polite"></p>
+    <p id="signature-note" class="metric-note">计数按设备日并集去重；同一设备日可能包含多个类型，类型计数和占比不能相加。日志片段保留原文，不视为已确认的崩溃签名。搜索仅筛选类型行，不改变分母。</p>
+    <div class="table-wrap" role="region" aria-label="崩溃类型表，可横向滚动" tabindex="0">
+      <table class="signature-table" aria-describedby="signature-summary signature-note"><caption class="sr-only">原始崩溃类型与设备日占比</caption><thead><tr><th scope="col">原始类型/签名</th><th scope="col">分类</th><th scope="col" class="numeric">受影响设备日</th><th scope="col" class="numeric">占匹配崩溃设备日</th><th scope="col" class="numeric" data-covered-share-label>占已覆盖平台同步设备日</th></tr></thead><tbody id="signature-table"><tr><td colspan="5">类型数据加载中…</td></tr></tbody></table>
+    </div>
+    <div class="signature-pagination"><p id="signature-count" class="metric-note" role="status" aria-live="polite"></p><button id="signature-more" class="text-button" type="button" hidden>显示更多（50 行）</button></div>
+  </section>
+  <p id="load-status" class="load-status" role="status" aria-live="polite">正在载入历史数据…</p>
+  <p class="metric-note">崩溃沿用源 event_date 上报日与 UTC 同步日匹配；上报日时区及延迟尚待核实。当前展示历史观测，暂不判定疑似回归。</p>
+</main>
+</body>
+</html>

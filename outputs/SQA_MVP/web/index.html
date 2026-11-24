@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>质量管理平台 · Race 3S</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <div id="auth" class="auth" hidden></div>
+  <div id="shell" class="shell" hidden>
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">Q</span><div>质量管理平台<small>SQA · 试点服务</small></div></div>
+      <div class="project-chip"><span>项目</span><strong>Race 3S</strong></div>
+      <nav id="nav" aria-label="工作台导航"></nav>
+      <div class="side-foot"><span class="local-dot"></span>质量试点环境</div>
+    </aside>
+    <main class="workspace">
+      <header class="toolbar"><div><strong>Race 3S</strong><span class="slash">/</span><span>RID</span><span class="slash">/</span><span>2.57.64</span></div><div class="identity"><span id="identity"></span><button id="logout" class="quiet">退出</button></div></header>
+      <div id="content" class="content" aria-live="polite"></div>
+    </main>
+  </div>
+  <dialog id="dialog"><section id="dialog-content"></section></dialog>
+  <div id="toast" role="status" hidden></div>
+</body>
+</html>

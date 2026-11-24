@@ -1,0 +1,42 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>第一批优化验收报告 · 2026-11-24</title><style>
+body{font:16px/1.75 "Microsoft YaHei",sans-serif;color:#203246;background:#f3f6fa;margin:0}main{max-width:1100px;margin:32px auto;background:#fff;padding:36px;border-radius:12px}h1{font-size:29px}h2{font-size:21px;margin-top:30px}a{color:#135aa8}table{border-collapse:collapse;width:100%;font-size:14px}th,td{border:1px solid #d7e1ec;padding:12px;text-align:left;vertical-align:top}th{background:#edf4fc}aside{background:#fff5df;border-left:5px solid #d38b00;padding:16px}code{font-family:Consolas,monospace;overflow-wrap:anywhere}li{margin:8px 0}@media(max-width:700px){main{padding:18px;margin:0}table{font-size:12px}th,td{padding:6px}}@media print{body{background:white}main{margin:0;padding:0}a{color:inherit}}
+</style><main>
+<h1>质量工作台第一批优化验收报告</h1>
+<p>2026 年 11 月 24 日 · 北京时间 · Race3S 质量体系本机试点</p>
+<aside><strong>功能验收通过，正式服务验收待完成。</strong><p>新增功能已在从备份恢复的独立验收副本中完成检查。正式服务 8765 的进程重启受到 Windows 账号权限阻塞。当前验收结论覆盖本报告列出的软件检查，组织级 ISO 体系符合性及业务批准结论继续等待正式审核证据。</p></aside>
+<h2>交付及验收状态</h2>
+<table><thead><tr><th>范围</th><th>状态</th><th>实现与检查结果</th></tr></thead><tbody><tr><td>数据口径与证据复核</td><td>功能通过</td><td>新增指标来源、项目、版本、阶段、统计截止、公式、范围、目标批准、实绩、证据与规则版本登记。提交完整性校验、独立复核、并发修订保护、来源变化失效、绿色判定门禁均通过。34 条历史指标已登记待补证草稿。</td></tr><tr><td>受控文件清单</td><td>功能通过</td><td>登记 14 份本地规范候选草稿。已验证独立审批、生效日期、负责人发布、修订期间旧有效版本可查、作废访问控制、历史留痕和 SHA-256 原件快照。有效版本及公司审批授权待确认。</td></tr><tr><td>岗位与权限</td><td>功能通过</td><td>十人独立账号全部通过办公网 IP 登录和接口权限检查。负责人管理授权，肖强协同审核，八位成员依项目分工访问指标与证据。禁止自行授权，任务继续执行独立验证及负责人关闭规则。</td></tr><tr><td>正式服务验收</td><td>待完成</td><td>8766 独立验收服务通过同机回环及办公网 IP 检查。原 8765 服务仍加载旧后端，办公网连接被拒绝。Windows 拒绝核验原启动进程 PID 52340，正式切换需原启动账号执行。另一台办公网设备验证仍待完成。</td></tr></tbody></table>
+<h2>当前访问与数据状态</h2>
+<ul>
+<li>验收服务可通过 <a href="http://127.0.0.1:8766/">本机 8766</a> 或 <a href="http://10.134.23.51:8766/">办公网 IP 8766</a> 访问。数据目录为 <code>work/sqa-restart-acceptance</code>，页面填写进入该独立副本。</li>
+<li>新增入口位于后台支持中的“口径与证据复核”“受控文件清单”。SQA 团队人员清单支持负责人维护项目及专项分工，保存原因和修订记录。</li>
+<li>原正式服务 <code>http://127.0.0.1:8765/</code> 仍可从本机访问，旧后端尚未加载本批治理功能。正式库迁移和草稿初始化待服务切换时执行。</li>
+<li>34 条指标草稿全部保留待补证状态，实际业务复核批准数为 0。14 份规范候选均保留草稿状态，生效文件数为 0。2.57.64 实绩及 RID 正式签核继续待补证。</li>
+<li>文件候选来自授权本地 quality-system/processes 目录。公司飞书链接可登记原始来源，远端访问及正式有效版本由相应审核证据确认。</li>
+</ul>
+<h2>可复核的检查结果</h2>
+<table><thead><tr><th>检查项</th><th>结果</th></tr></thead><tbody>
+<tr><td>闭环和异常控制</td><td>5 组隔离场景通过，覆盖项目隔离、自行授权拒绝、并发修订冲突、提交完整性、独立复核、缺证判灯、来源变更失效、受控文件生命周期和恢复一致性。</td></tr>
+<tr><td>十人账号</td><td>10 / 10 通过。覆盖登录、三类角色接口权限、项目范围和退出会话失效。11 位最短密码校验在验收服务生效。</td></tr>
+<tr><td>页面与既有功能</td><td>7 个一级栏目、36 个负责人页面、41 个 PR 版本、3 期案例期刊及 45 个报告文件通过检查。新增表单、筛选、390 像素窄屏通过，浏览器异常为 0。</td></tr>
+<tr><td>完整验收数据恢复</td><td>恢复后复验 10 个账号、34 条指标草稿、14 份文件草稿、41 个 PR 版本。48 个治理快照逐一通过 SHA-256 校验，45 个外部本地报告文件逐一可读。</td></tr>
+<tr><td>恢复耗时</td><td>本次完整验收集恢复及接口检查耗时 2.828 秒，条件为本机原有资料目录和运行配置可读取。4 小时恢复目标的正式服务演练仍随生产切换验收。</td></tr>
+<tr><td>核心回归</td><td>指标和实绩快照、PR/Bug 暂存发布、重复导入、回退、独立整改验证、贡献人冲突、负责人关闭、停用会话和备份恢复检查通过。</td></tr>
+</tbody></table>
+<h2>本轮实施时采用的处理</h2>
+<ul>
+<li>复用现有后端、数据库和本地资料读取逻辑，通过新增治理表和接口落实流程。验收采用独立恢复副本，正式服务待完成进程切换后加载。</li>
+<li>根据已提供的十人分工登记项目与专项。曾建芬保留负责人角色，肖强保留协同审核角色。项目名称“Race3（归属待确认）”与“Chitu NIO”分别映射为 Race3、Chitu 用于权限匹配，归属解释继续留待确认。</li>
+<li>文件登记采用负责人维护、独立审核人审批、负责人发布的试点流程。公司正式文件批准权限和具体规范有效版本继续列为待确认事项。</li>
+<li>全部指标和规范候选以草稿进入验收库。业务目标、批准依据、实绩、统计截止与文件版本按照真实材料补齐并复核后生效。</li>
+</ul>
+<h2>遗留事项与完成条件</h2>
+<table><thead><tr><th>顺序</th><th>事项</th><th>协同方及完成条件</th></tr></thead><tbody>
+<tr><td>1</td><td>正式服务切换</td><td>原 Windows 启动账号或 IT 使用现有 Restart-SqaPilot.ps1，先备份再核验进程并重启。加载新后端后执行幂等治理草稿初始化，复验 8765 两个地址和十人权限。</td></tr>
+<tr><td>2</td><td>正式运行与异机访问验收</td><td>由 IT 或另一位团队成员在另一台公司办公网设备验证登录、项目范围、证据访问及注销。补验开机自启、休眠/重启恢复、工作日自动备份、30 天清理和正式服务恢复演练。HTTPS 及证书方案待 IT 确认。</td></tr>
+<tr><td>3</td><td>公司质量体系基线与文件审批</td><td>负责人协同肖强确认适用 ISO / 公司 QES 基线、14 份候选的有效版本、正式批准角色、生效范围和保留期限。按流程逐份提交、审核并发布。</td></tr>
+<tr><td>4</td><td>34 条指标实绩及口径</td><td>各指标责任人补统计截止、范围、公式、目标批准、版本实绩和原始凭据。独立复核后生成有效质量判定。2.57.64 及 RID 签核持续待补证。</td></tr>
+<tr><td>5</td><td>维护责任与例外处理</td><td>维护 Owner、替补人员、正式文件保留周期以及项目归属映射待确认。若负责人和肖强均参与某条记录编制，需配置具备审核权限的独立人员。</td></tr>
+</tbody></table>
+<h2>验收证据</h2><p>下列记录位于本工程 work 目录，可逐项回查。</p><ul><li><a href="../../work/governance-acceptance.json">governance-acceptance.json</a></li><li><a href="../../work/governance-accounts-lan-8766.json">governance-accounts-lan-8766.json</a></li><li><a href="../../work/governance-framework-8766-acceptance.json">governance-framework-8766-acceptance.json</a></li><li><a href="../../work/governance-full-restore-acceptance.json">governance-full-restore-acceptance.json</a></li><li><a href="../../work/governance-seed-acceptance.json">governance-seed-acceptance.json</a></li><li><a href="../../work/governance-service-acceptance.json">governance-service-acceptance.json</a></li><li><a href="../../work/governance-ui-acceptance.json">governance-ui-acceptance.json</a></li></ul>
+<p>报告与软件功能检查由当前协作任务生成。正式业务批准、服务切换签核及体系审核结论由相应授权人员完成。</p></main></html>
