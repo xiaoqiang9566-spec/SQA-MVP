@@ -1,5 +1,6 @@
 """一次性执行协调器；阶段检查点与副作用日志分别持久化。"""
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -9,7 +10,7 @@ from pathlib import Path
 
 from bug_audit import BugAudit
 from store import Store
-from .config import ConfigError, require
+from .config import ConfigError, require, canonical_url
 from .history import SHANGHAI, timestamp
 from .journal import Journal, JournalError, digest, encoded
 from .model import ModelClient, redact
@@ -31,8 +32,10 @@ class Worker:
         self.feishu = (adapters or {}).get("feishu") or FeishuClient(config)
         self.demo = bool((adapters or {}).get("demo"))
         scope = config.section("scope")
-        self.scope_hash = digest({"origin": config.data["tp"]["base_url"], "project": scope["project_id"], "teams": sorted(scope["team_ids"])})
-        self.config_hash = digest({"config": config.data, "rules": rules_digest(),
+        normalized = copy.deepcopy(config.data)
+        for section in ("tp", "model", "feishu"): normalized[section]["base_url"] = canonical_url(normalized[section]["base_url"])
+        self.scope_hash = digest({"origin": normalized["tp"]["base_url"], "project": scope["project_id"], "teams": sorted(scope["team_ids"])})
+        self.config_hash = digest({"config": normalized, "rules": rules_digest(),
                                   "prompt": hashlib.sha256((Path(__file__).parent / "prompts/semantic-review.md").read_bytes()).hexdigest()})
 
     def _apply_gate(self, window, run_id=None):
@@ -51,13 +54,22 @@ class Worker:
             for row in rows:
                 if row["id"] == run_id: continue
                 scope = json.loads(row["scope_json"])
-                if scope.get("scope_hash") and scope["scope_hash"] != self.scope_hash: continue
+                if row["mode"] is None:
+                    project = scope.get("project", "")
+                    same_project = (not project or project == self.config.data["scope"]["project_name"]
+                                    or project.startswith(str(self.config.data["scope"]["project_id"]) + " "))
+                    if same_project:
+                        effects = db.execute("SELECT 1 FROM bug_audit_events WHERE run_id=? AND stage IN ('writeback','notification') LIMIT 1", (row["id"],)).fetchone()
+                        require(effects is None, "旧执行器当天已有副作用记录，禁止同日切换 apply")
+                    continue
+                if scope.get("scope_hash") and scope["scope_hash"] != self.scope_hash:
+                    # 旧 Worker 身份没有保存可逆 origin；同名同团队的旧 apply 保守阻塞。
+                    if row["mode"] == "apply" and scope.get("project") == self.config.data["scope"]["project_name"] and set(scope.get("teams", [])) == set(self.config.data["scope"]["team_names"]):
+                        raise ConfigError("同日存在旧身份的相同项目团队 apply，需先人工对账，禁止新建重复运行")
+                    continue
                 if not scope.get("scope_hash") and scope.get("project") not in (None, "", self.config.data["scope"]["project_name"]): continue
                 if row["mode"] == "apply":
                     require(row["profile"] == self.config.profile, "相同范围当天已有其他 profile 的 apply，禁止重复执行")
-                elif row["mode"] is None:
-                    effects = db.execute("SELECT 1 FROM bug_audit_events WHERE run_id=? AND stage IN ('writeback','notification') LIMIT 1", (row["id"],)).fetchone()
-                    require(effects is None, "旧执行器当天已有副作用记录，禁止同日切换 apply")
 
     def _save(self, run_id, mode, window, state, stage):
         # 内容寻址：文件已落地但 DB 更新前中断时，旧检查点仍完整可恢复。

@@ -10,6 +10,8 @@
 
 **Spec:** [已批准设计](../specs/2026-11-24-bug-audit-independent-worker-design.md)
 
+**执行状态（2026-11-24）:** Tasks 1–10 的代码、离线验收及独立审查修复已完成，最终干净 venv 97/97 通过；真实 TP 元数据及公司 Responses 合成探针已通过，隔离真实只读链正在验证。生产 apply、人工语义对照、跨平台 CI 和调度切换仍待相应验收，详见 [验证记录](../validation/2026-11-24-bug-audit-independent-worker.md)。
+
 ## Global Constraints
 
 - 只改 Bug 审计专属代码、测试、配置、依赖、CI 和文档；不改通用 store.py/imports.py/sync.py 或其他页面。

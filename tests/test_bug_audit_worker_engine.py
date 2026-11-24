@@ -94,6 +94,12 @@ class EngineTests(unittest.TestCase):
         self.worker.audit.record_notification(old["id"], "old-sent", {"schema_version": 1, "status": "sent"})
         with self.assertRaises(ConfigError): self.worker.run("apply", WINDOW)
 
+    def test_legacy_display_labels_and_old_hash_cannot_bypass_day_gate(self):
+        old = self.worker.audit.begin_run("legacy-labels", WINDOW, {"project": "1 Synthetic", "teams": ["2 A", "3 B"], "scope_hash": "f" * 64}, "v1")
+        self.worker.audit.record_notification(old["id"], "sent", {"schema_version": 1, "status": "sent"})
+        with self.assertRaises(ConfigError): self.worker.run("apply", WINDOW)
+        self.assertFalse(self.remote.requests)
+
     def test_model_budget_survives_interrupted_review(self):
         self.remote.config.data["limits"]["max_model_calls"] = 1
         worker = Worker(self.remote.config)
@@ -135,6 +141,51 @@ class EngineTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             self.assertNotIn("not-a-real-secret", text)
             self.assertNotIn("person@example.com", text)
+
+
+    def test_equivalent_tp_url_cannot_duplicate_daily_apply(self):
+        first = self.worker.run("apply", WINDOW)
+        cfg = copy.deepcopy(self.remote.config)
+        cfg.data["tp"]["base_url"] += "/"
+        second = Worker(cfg).run("apply", WINDOW)
+        self.assertEqual(second["run_id"], first["run_id"])
+        self.assertEqual(self.remote.counts[("POST", "/open-apis/im/v1/messages")], 2)
+
+    def test_old_scope_identity_requires_reconciliation_before_new_apply(self):
+        run = self.worker.audit.begin_run("old-worker", WINDOW, {"project": "Synthetic", "teams": ["A", "B"], "scope_hash": "f" * 64}, "2026-11-10")
+        self.worker.journal.save_job(run["id"], "old", "apply", WINDOW, "old-config", "complete", {})
+        with self.assertRaises(ConfigError): self.worker.run("apply", WINDOW)
+        self.assertFalse(self.remote.requests)
+
+    def test_feature_evidence_change_before_write_blocks_stale_plan(self):
+        self.remote.features = [{"id": 25, "name": "Navigation", "projectId": 1, "description": "Covers navigation reset"}]
+        original = self.remote.response
+        calls = 0
+        def intercept(method, path, query, body, headers):
+            nonlocal calls
+            if path.startswith("/api/v2/Context/"):
+                self.remote.intercept = None
+                try: status, value = original(method, path, query, body, headers)
+                finally: self.remote.intercept = intercept
+                for field in value["customFields"]["items"]:
+                    if field["name"] == "Bug Standard Review of Testing": field["value"] += "\nFeature is missing"
+                return status, value
+            if path == "/v1/responses":
+                calls += 1
+                self.remote.intercept = None
+                try: status, value = original(method, path, query, body, headers)
+                finally: self.remote.intercept = intercept
+                answer = json.loads(value["output"][0]["content"][0]["text"])
+                target = next(c for c in answer["checks"] if c["rule_id"] == "submission.feature")
+                target.update(status="fail", reason="Feature存在但未关联", evidence_refs=["body", "feature:25"])
+                value["output"][0]["content"][0]["text"] = json.dumps(answer)
+                if calls == 2: self.remote.features[0]["description"] = "Unrelated music playback only"
+                return status, value
+        self.remote.intercept = intercept
+        result = self.worker.run("apply", WINDOW)
+        self.assertEqual(calls, 2)
+        self.assertEqual(self.remote.counts[("POST", "/api/v1/Bugs/bulk")], 0)
+        self.assertEqual(result["exit_code"], 3)
 
 
 if __name__ == "__main__": unittest.main()

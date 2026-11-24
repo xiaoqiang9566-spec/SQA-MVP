@@ -56,6 +56,10 @@ class WorkerServer:
                 "customValues":{"customFields":[{"name":name,"value":value} for name,value in self.fields.items()]}}
 
     def response(self,method,path,q,body,headers):
+        intercept = getattr(self, "intercept", None)
+        if intercept:
+            answer = intercept(method, path, q, body, headers)
+            if answer is not None: return answer
         if path=="/api/v1/Bugs/bulk":
             payload=json.loads(body)
             for bug in payload:

@@ -2,7 +2,7 @@
 from bug_audit import _same_field_value
 from .config import ConfigError
 from .journal import digest
-from .tp import FIELDS, business_fingerprint, raw_business_hash
+from .tp import FIELDS, business_fingerprint, raw_business_hash, feature_index_hash, feature_source_hash
 from .transport import TransportError
 
 
@@ -66,6 +66,11 @@ class Writeback:
                 current=next(i for i in refreshed["items"] if i["bug_id"]==bid)
                 changed=(business_fingerprint(current)!=before.get("source_hash",business_fingerprint(before))
                          or refreshed["completeness"]!="complete" or digest(refreshed["options"])!=digest(bundle["options"]))
+                changed = changed or refreshed.get("feature_index_hash", feature_index_hash(refreshed["features"])) != bundle.get("feature_index_hash", feature_index_hash(bundle["features"]))
+                used = {str(row["id"]): row for row in bundle.get("feature_details", []) + before.get("review_features", [])}
+                if not changed and used:
+                    actual = self.tp.feature_details([int(value) for value in used], refreshed["features"])
+                    changed = any(row["source_hash"] != used[str(row["id"])].get("source_hash", feature_source_hash(used[str(row["id"])])) for row in actual)
             except (TransportError,ConfigError,StopIteration):
                 current=None;changed=True
             if changed:

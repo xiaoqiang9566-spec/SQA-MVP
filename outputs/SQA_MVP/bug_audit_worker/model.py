@@ -25,7 +25,7 @@ def pending(item, reason):
     return [check(rid,"pending",reason) for rid in semantic_rules(item)]
 
 
-def validate_review(response, item, features):
+def validate_review(response, item, features, diagnostics=None):
     required=semantic_rules(item)
     if not isinstance(response,dict) or set(response)!={"schema_version","checks","coverage"} or response.get("schema_version")!=1:
         return pending(item,"模型输出结构无效")
@@ -46,6 +46,7 @@ def validate_review(response, item, features):
     detailed={str(f["id"]) for f in features.get("details",[]) if isinstance(f.get("description"),str)}
     known={"body","snapshot","comments"}|{"comment:"+c for c in expected_comments}|{"field:"+f for f in expected_fields}|{"feature:"+f for f in known_features}
     by_id={r["rule_id"]:r for r in results};output=[]
+    if diagnostics is not None: diagnostics["valid"] = True
     for rid in required:
         result=by_id[rid]
         status=result.get("status");reason=result.get("reason");refs=result.get("evidence_refs")
@@ -54,8 +55,17 @@ def validate_review(response, item, features):
                and redact(reason)==reason and isinstance(refs,list) and all(isinstance(ref,str) and ref in known for ref in refs)
                and (status not in {"pass","fail"} or bool(refs)))
         if not valid:
+            if diagnostics is not None: diagnostics["valid"] = False
             output.append(check(rid,"pending","模型引用或检查结论无效"));continue
-        if status=="not_applicable" and rid in {"submission.firmware","submission.reproducibility","flow.state_consistency"}:
+        state = str(item.get("snapshot", {}).get("state", "")).casefold()
+        mandatory = {"submission.firmware", "submission.reproducibility", "flow.state_consistency"}
+        if state in {"invalid", "duplicate", "wont fix", "later", "reproduce", "needs info"}:
+            mandatory.add("flow.explanation")
+        if state in {"invalid", "reproduce", "needs info"}:
+            mandatory.add("flow.keywords")
+        if item.get("feature_id"):
+            mandatory.add("submission.feature")
+        if status=="not_applicable" and rid in mandatory:
             output.append(check(rid,"pending","模型跳过了必须审查的检查项"));continue
         if item.get("evidence",{}).get("comments")!="complete" or item.get("evidence",{}).get("description")!="complete":
             output.append(check(rid,"pending","正文或评论证据不完整"));continue
@@ -92,6 +102,7 @@ class ModelClient:
         self.http=http or HTTPClient(config.data["model"]["base_url"],**config.section("transport"))
 
     def review(self,item,facts,features):
+        self.last_validation = {"valid": False}
         cfg=self.config.data["model"]
         payload={"rule_version":RULE_VERSION,"required_checks":semantic_rules(item),"body":redact(item.get("body")),
                  "snapshot":{k:redact(v) for k,v in item.get("snapshot",{}).items()},"fields":submitted_fields(item),
@@ -127,7 +138,7 @@ class ModelClient:
                 content=[c for o in outputs if o.get("type")=="message" for c in o.get("content",[])]
                 if any(c.get("type")!="output_text" for c in content):return pending(item,"模型拒绝或输出类型无效")
                 text="".join(c["text"] for c in content)
-            return validate_review(json.loads(text),item,features)
+            return validate_review(json.loads(text),item,features,self.last_validation)
         except (TransportError,ValueError,KeyError,IndexError,TypeError):
             return pending(item,"公司模型调用或响应校验失败")
 
@@ -135,4 +146,5 @@ class ModelClient:
         synthetic={"created_at":"2025-01-01T00:00:00+08:00","snapshot":{"state":"Open"},"body":"合成连通性测试，无真实业务资料", "fields":{},"comments":[],
                    "evidence":{"comments":"complete","description":"complete"}}
         checks=self.review(synthetic,{}, {"items":[],"details":[],"status":"complete"})
-        return {"status":"ready" if checks and all(c["status"]!="pending" for c in checks) else "blocked","calls":self.calls}
+        return {"status":"ready" if self.last_validation["valid"] else "blocked","calls":self.calls,
+                "semantic_status":"pending" if any(c["status"]=="pending" for c in checks) else "complete"}

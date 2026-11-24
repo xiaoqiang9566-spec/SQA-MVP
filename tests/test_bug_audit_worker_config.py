@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "outputs" / "SQA_MVP"))
-from bug_audit_worker.config import ConfigError, doctor, load_config
+from bug_audit_worker.config import ConfigError, doctor, load_config, canonical_url
 
 EXAMPLE = '''
 [worker]
@@ -40,6 +40,11 @@ mentions = [{open_id="configured-user", name="Reviewer"}]
 '''
 
 class ConfigTests(unittest.TestCase):
+    def test_equivalent_origin_and_default_port_normalization_keeps_path_case(self):
+        self.assertEqual(canonical_url("https://TP.EXAMPLE.invalid:443/"), "https://tp.example.invalid")
+        self.assertEqual(canonical_url("http://LOCALHOST:80/api/V2/"), "http://localhost/api/V2")
+        self.assertEqual(canonical_url("http://[::1]:8800/"), "http://[::1]:8800")
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="审计 config ")
         self.addCleanup(self.tmp.cleanup)

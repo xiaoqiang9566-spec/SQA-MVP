@@ -6,12 +6,22 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 
 class ConfigError(ValueError):
     pass
+
+
+def canonical_url(value):
+    parsed = urlsplit(value)
+    host = (parsed.hostname or "").lower()
+    if ":" in host: host = "[" + host + "]"
+    port = parsed.port
+    if port and not (parsed.scheme == "https" and port == 443 or parsed.scheme == "http" and port == 80):
+        host += ":" + str(port)
+    return urlunsplit((parsed.scheme.lower(), host, parsed.path.rstrip("/"), "", ""))
 
 
 def require(condition, message):

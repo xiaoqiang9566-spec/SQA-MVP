@@ -33,6 +33,14 @@ def business_fingerprint(item):
     return digest({k: item.get(k) for k in ("snapshot", "body", "created_at", "feature_id", "fields", "comments", "relations", "evidence", "lifecycle")})
 
 
+def feature_index_hash(rows):
+    return digest(sorted(({key: row.get(key) for key in ("id", "name", "projectId")} for row in rows), key=lambda row: str(row["id"])))
+
+
+def feature_source_hash(row):
+    return digest({key: row.get(key) for key in ("id", "name", "description", "projectId")})
+
+
 def raw_business_hash(bug):
     value={k:v for k,v in bug.items() if k not in {"modifyDate","customValues"}}
     for key in ("assignedTeamIds","assignedTeams"):
@@ -135,6 +143,7 @@ class TPClient:
             features = []; feature_status = "partial"
         linked = sorted({bug.get("featureId") for bug in bugs if bug.get("featureId")})
         details, detail_status = self._batch("Features", "id", "{id,name,description,projectId:project.id}", linked)
+        details = [{**row, "source_hash": feature_source_hash(row)} for row in details]
         if detail_status != "complete": feature_status = "partial"
         by_bug = {str(b["id"]): b for b in bugs}
         rels = {str(r["id"]): r for r in relations}
@@ -158,7 +167,7 @@ class TPClient:
         complete = not unresolved and history_status == comment_status == relation_status == feature_status == "complete" and all(i["evidence"]["relations"] == "complete" for i in items)
         return {"window": window, "scope": self.config.section("scope"), "candidate_count": len(bugs) if candidate_count is None else candidate_count,
                 "items": items, "unresolved": unresolved, "completeness": "complete" if complete else "partial", "options": metadata["options"],
-                "features": features, "feature_details": details, "feature_status": feature_status}
+                "features": features, "feature_index_hash": feature_index_hash(features), "feature_details": details, "feature_status": feature_status}
 
     def feature_details(self, ids, index):
         known = {str(f["id"]) for f in index if f.get("projectId") == self.config.data["scope"]["project_id"]}
@@ -167,7 +176,7 @@ class TPClient:
         rows, status = self._batch("Features", "id", "{id,name,description,projectId:project.id}", ids)
         if status != "complete" or {str(r["id"]) for r in rows} != set(map(str, ids)) or any(r.get("projectId") != self.config.data["scope"]["project_id"] for r in rows):
             raise ConfigError("Feature 描述未完整获取或项目范围不符")
-        return rows
+        return [{**row, "source_hash": feature_source_hash(row)} for row in rows]
 
     def collect(self, window):
         metadata = self.metadata(); scope = self.config.data["scope"]

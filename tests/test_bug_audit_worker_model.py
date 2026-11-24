@@ -80,4 +80,26 @@ class ModelTests(unittest.TestCase):
         result=next(c for c in client.review(self.record,{},features) if c["rule_id"]=="submission.feature")
         self.assertEqual(result["status"],"fail")
 
+    def test_required_state_explanation_cannot_be_skipped_by_model(self):
+        for state in ("Invalid", "Duplicate", "Wont fix", "Later", "Reproduce", "Needs info"):
+            with self.subTest(state=state):
+                self.record["snapshot"]["state"] = state
+                for result in self.answer["checks"]:
+                    if result["rule_id"] in {"flow.explanation", "flow.keywords", "submission.feature", "submission.app_platform", "submission.app_version"}:
+                        result.update(status="not_applicable", evidence_refs=[])
+                checks = {c["rule_id"]: c for c in self.review()}
+                self.assertEqual(checks["flow.explanation"]["status"], "pending")
+                if state in {"Invalid", "Reproduce", "Needs info"}:
+                    self.assertEqual(checks["flow.keywords"]["status"], "pending")
+
+    def test_probe_distinguishes_valid_pending_semantics_from_protocol_failure(self):
+        self.answer = {"schema_version": 1, "checks": [{"rule_id": rid, "status": "pending", "reason": "合成资料不足", "evidence_refs": []}
+                       for rid in ("flow.explanation", "flow.keywords", "flow.state_consistency")],
+                       "coverage": {"body": True, "comment_ids": [], "field_names": []}}
+        result = ModelClient(self.cfg, self.http).probe()
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["semantic_status"], "pending")
+        self.answer["coverage"]["comment_ids"] = ["forged"]
+        self.assertEqual(ModelClient(self.cfg, self.http).probe()["status"], "blocked")
+
 if __name__=="__main__":unittest.main()
