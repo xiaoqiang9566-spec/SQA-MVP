@@ -30,7 +30,15 @@ def id_where(key, ids):
 
 
 def business_fingerprint(item):
-    return digest({k: item.get(k) for k in ("snapshot", "body", "created_at", "feature_id", "fields", "comments", "relations", "evidence")})
+    return digest({k: item.get(k) for k in ("snapshot", "body", "created_at", "feature_id", "fields", "comments", "relations", "evidence", "lifecycle")})
+
+
+def raw_business_hash(bug):
+    value={k:v for k,v in bug.items() if k not in {"modifyDate","customValues"}}
+    for key in ("assignedTeamIds","assignedTeams"):
+        if isinstance(value.get(key),list):value[key]=sorted(value[key])
+    value["customFields"]={k:v for k,v in custom_fields(bug).items() if k not in FIELDS}
+    return digest(value)
 
 
 class TPClient:
@@ -145,6 +153,7 @@ class TPClient:
                     "lifecycle": hs[bid], "relations": {k:rel.get(k) for k in ("inbound", "outbound")},
                     "evidence": {"history": history_status, "comments": comment_status, "relations": "complete" if rel_complete else "partial", "description": "complete", "attachments": "not_requested"}}
             item["source_hash"] = business_fingerprint(item)
+            item["business_hash"] = raw_business_hash(bug)
             items.append(item)
         complete = not unresolved and history_status == comment_status == relation_status == feature_status == "complete" and all(i["evidence"]["relations"] == "complete" for i in items)
         return {"window": window, "scope": self.config.section("scope"), "candidate_count": len(bugs) if candidate_count is None else candidate_count,
