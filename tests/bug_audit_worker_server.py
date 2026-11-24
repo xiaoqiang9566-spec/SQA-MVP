@@ -74,7 +74,7 @@ class WorkerServer:
             return 200,{"items":[{"id":10,"sourceEntityId":1,"date":"2026-11-23T12:00:00+08:00","modification":"Add","stateName":"New","severityName":"Major"},
                                 {"id":11,"sourceEntityId":1,"date":"2026-11-24T12:00:00+08:00","modification":"Update","changes":"EntityState","stateName":"Open","severityName":"Major"}],"next":None}
         if path.endswith("/Comments"):return 200,{"items":[{"id":20,"generalId":1,"createDate":"2026-11-24T12:00:00+08:00","description":"Retest navigation; reset crosses different features."}],"next":None}
-        if path.endswith("/Features"):return 200,{"items":[],"next":None}
+        if path.endswith("/Features"):return 200,{"items":getattr(self,"features",[]),"next":None}
         if path.startswith("/v1/"):
             request=json.loads(body);messages=request.get("input",request.get("messages"))
             user=json.loads(messages[-1]["content"])

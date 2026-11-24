@@ -160,6 +160,15 @@ class TPClient:
                 "items": items, "unresolved": unresolved, "completeness": "complete" if complete else "partial", "options": metadata["options"],
                 "features": features, "feature_details": details, "feature_status": feature_status}
 
+    def feature_details(self, ids, index):
+        known = {str(f["id"]) for f in index if f.get("projectId") == self.config.data["scope"]["project_id"]}
+        if not ids or len(ids) > self.config.data["limits"]["max_features"] or not set(map(str, ids)) <= known:
+            raise ConfigError("Feature 补取必须属于已读取项目索引且不超过预算")
+        rows, status = self._batch("Features", "id", "{id,name,description,projectId:project.id}", ids)
+        if status != "complete" or {str(r["id"]) for r in rows} != set(map(str, ids)) or any(r.get("projectId") != self.config.data["scope"]["project_id"] for r in rows):
+            raise ConfigError("Feature 描述未完整获取或项目范围不符")
+        return rows
+
     def collect(self, window):
         metadata = self.metadata(); scope = self.config.data["scope"]
         where = "project.id == " + str(scope["project_id"]) + " and assignedTeams.Where(" + id_where("team.id", scope["team_ids"]) + ").Count > 0 and modifyDate >= Convert.ToDateTime(\"" + timestamp(window["start"]).isoformat() + "\")"
