@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS bug_audit_worker_intents (
  kind TEXT NOT NULL, payload_hash TEXT NOT NULL, details_json TEXT NOT NULL,
  status TEXT NOT NULL, receipt_json TEXT NOT NULL DEFAULT '{}', changed TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS bug_audit_worker_intent_events (
+ id INTEGER PRIMARY KEY, operation_key TEXT NOT NULL REFERENCES bug_audit_worker_intents(operation_key),
+ status TEXT NOT NULL, receipt_json TEXT NOT NULL, changed TEXT NOT NULL
+);
 """
 
 
@@ -137,12 +141,14 @@ class Journal:
                 return self._intent(row)
             db.execute("INSERT INTO bug_audit_worker_intents VALUES(?,?,?,?,?,'prepared','{}',?)",
                        (key, run_id, kind, payload_hash, encoded(details), now()))
+            db.execute("INSERT INTO bug_audit_worker_intent_events(operation_key,status,receipt_json,changed) VALUES(?,'prepared','{}',?)",(key,now()))
             return self._intent(db.execute("SELECT * FROM bug_audit_worker_intents WHERE operation_key=?", (key,)).fetchone())
 
     def inflight(self, key):
         with self.store.connection(True) as db:
             changed = db.execute("UPDATE bug_audit_worker_intents SET status='in_flight',changed=? WHERE operation_key=? AND status='prepared'", (now(), key)).rowcount
             if changed != 1: raise JournalError("操作已执行或结果尚未核实，禁止重复请求")
+            db.execute("INSERT INTO bug_audit_worker_intent_events(operation_key,status,receipt_json,changed) VALUES(?,'in_flight','{}',?)",(key,now()))
 
     def settle(self, key, status, receipt):
         if status not in {"verified", "failed", "unknown", "conflict"}: raise JournalError("回执状态无效")
@@ -153,7 +159,16 @@ class Journal:
             if row["status"] != "verified":
                 db.execute("UPDATE bug_audit_worker_intents SET status=?,receipt_json=?,changed=? WHERE operation_key=?",
                            (status, encoded(receipt), now(), key))
+                db.execute("INSERT INTO bug_audit_worker_intent_events(operation_key,status,receipt_json,changed) VALUES(?,?,?,?)",(key,status,encoded(receipt),now()))
             return self._intent(db.execute("SELECT * FROM bug_audit_worker_intents WHERE operation_key=?", (key,)).fetchone())
+
+    def retry_failed(self,key):
+        with self.store.connection(True) as db:
+            row=db.execute("SELECT * FROM bug_audit_worker_intents WHERE operation_key=?",(key,)).fetchone()
+            if row is None or row["status"]!="failed" or json.loads(row["receipt_json"]).get("safe_retry") is not True:
+                raise JournalError("不能重试未经证明拒绝的请求")
+            db.execute("UPDATE bug_audit_worker_intents SET status='prepared',changed=? WHERE operation_key=?",(now(),key))
+            db.execute("INSERT INTO bug_audit_worker_intent_events(operation_key,status,receipt_json,changed) VALUES(?,'prepared',?,?)",(key,row["receipt_json"],now()))
 
     def intents(self, run_id):
         with self.store.connection() as db:

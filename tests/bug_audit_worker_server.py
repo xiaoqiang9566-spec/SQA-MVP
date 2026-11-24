@@ -20,7 +20,7 @@ class WorkerServer:
         self.counts=Counter();self.requests=[];self.fields={name:None for name in FIELDS}
         self.fields.update({"Bug Category":"Functional","REG issue":"No"})
         self.state="Open";self.lose_tp_response=False;self.messages={};self.fail_file_send=False
-        self.csv=b"";self.members_allowed=True;self.uploaded_file=None
+        self.csv=b"";self.members_allowed=True;self.uploaded_file=None;self.lose_summary_response=False
         owner=self
         class Handler(BaseHTTPRequestHandler):
             def log_message(self,*_):pass
@@ -83,4 +83,33 @@ class WorkerServer:
             answer=json.dumps({"schema_version":1,"checks":checks,"coverage":{"body":True,"comment_ids":[c["id"] for c in user["comments"]],"field_names":list(user["fields"])}})
             if path.endswith("responses"):return 200,{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":answer}]}]}
             return 200,{"choices":[{"finish_reason":"stop","message":{"content":answer}}]}
+        if path=="/open-apis/auth/v3/tenant_access_token/internal":
+            return 200,{"code":0,"tenant_access_token":"synthetic-tenant-token","expire":7200}
+        if path=="/open-apis/bot/v3/info":return 200,{"code":0,"bot":{"open_id":"configured-bot","activate_status":2,"app_name":"Synthetic bot"}}
+        if path=="/open-apis/im/v1/chats/configured-chat":return 200,{"code":0,"data":{"name":"Synthetic"}}
+        if path.endswith("/members"):
+            return (200,{"code":0,"data":{"items":[{"member_id":"configured-user","name":"Reviewer"}],"has_more":False}}) if self.members_allowed else (403,{"code":99991672})
+        if path=="/open-apis/im/v1/files" and method=="POST":
+            marker=b'name="file"; filename="'
+            part=body[body.index(marker):];self.uploaded_file=part.split(b'\r\n\r\n',1)[1].rsplit(b'\r\n--',1)[0]
+            self.csv=self.uploaded_file
+            return 200,{"code":0,"data":{"file_key":"file_synthetic"}}
+        if path=="/open-apis/im/v1/messages" and method=="POST":
+            value=json.loads(body)
+            if self.fail_file_send and value["msg_type"]=="file":return 403,{"code":230006}
+            mid="om_synthetic_"+str(len(self.messages)+1)
+            content=json.loads(value["content"])
+            mentions=[]
+            if value["msg_type"]=="post":
+                mentions=[{"id":tag["user_id"],"key":"@_user_"+str(index),"id_type":"open_id"} for index,tag in enumerate(tag for row in content["zh_cn"]["content"] for tag in row if tag["tag"]=="at")]
+            else:content["file_name"]=value.get("file_name","Bug审计明细.csv")
+            self.messages[mid]={"message_id":mid,"chat_id":value["receive_id"],"msg_type":value["msg_type"],"deleted":False,
+                                "sender":{"id":"configured-app","id_type":"app_id","sender_type":"app"},"mentions":mentions,
+                                "body":{"content":json.dumps(content,ensure_ascii=False)}}
+            if self.lose_summary_response and value["msg_type"]=="post":return 0,{}
+            return 200,{"code":0,"data":{"message_id":mid}}
+        if "/resources/" in path:return 200,self.csv
+        if path.startswith("/open-apis/im/v1/messages/"):
+            mid=path.rsplit("/",1)[-1]
+            return 200,{"code":0,"data":{"items":[copy.deepcopy(self.messages[mid])] if mid in self.messages else []}}
         return 404,{"code":404}
