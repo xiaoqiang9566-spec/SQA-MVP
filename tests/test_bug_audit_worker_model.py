@@ -1,0 +1,83 @@
+import json
+import sys
+import tempfile
+import threading
+import unittest
+from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"outputs"/"SQA_MVP"))
+from bug_audit_worker.config import load_config
+from bug_audit_worker.model import ModelClient
+from bug_audit_worker.transport import HTTPClient
+from bug_audit_worker.rules import semantic_rules
+from tests.test_bug_audit_worker_config import EXAMPLE
+from tests.test_bug_audit_worker_rules import item
+
+class ModelTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        p=Path(self.tmp.name)/"config.toml";p.write_text(EXAMPLE,encoding="utf-8");self.cfg=load_config(p)
+        self.record=item();self.record["body"]="Firmware 1.0; email: me@example.com; api_key=secret123"
+        self.record["comments"]=[{"id":"20","at":"2026-11-24T12:00:00+08:00","text":"test the scenario"}]
+        self.answer={"schema_version":1,"checks":[{"rule_id":rid,"status":"pass","reason":"资料已核对","evidence_refs":["body"]} for rid in semantic_rules(self.record)],
+                     "coverage":{"body":True,"comment_ids":["20"],"field_names":["Bug Category","REG issue"]}}
+        self.requests=[];owner=self
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self,*_):pass
+            def do_POST(self):
+                body=json.loads(self.rfile.read(int(self.headers["Content-Length"])));owner.requests.append((self.path,body))
+                text=json.dumps(owner.answer)
+                payload={"choices":[{"finish_reason":"stop","message":{"content":text}}]} if "chat" in self.path else {"status":"completed","output":[{"type":"reasoning","summary":[]},{"type":"message","content":[{"type":"output_text","text":text}]}]}
+                self.send_response(200);self.end_headers();self.wfile.write(json.dumps(payload).encode())
+        self.server=ThreadingHTTPServer(("127.0.0.1",0),Handler);self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start();self.addCleanup(self.stop)
+        self.http=HTTPClient("http://127.0.0.1:"+str(self.server.server_port)+"/v1",allow_loopback_http=True)
+        self.env=patch.dict("os.environ",{"TEST_MODEL_KEY":"configured-secret"});self.env.start();self.addCleanup(self.env.stop)
+
+    def stop(self):self.server.shutdown();self.server.server_close();self.thread.join(3)
+    def review(self):return ModelClient(self.cfg,self.http).review(self.record,{}, {"items":[],"details":[],"status":"complete"})
+
+    def test_both_protocols_use_no_tools_and_business_data_is_redacted(self):
+        # Feature pass needs explicit matching Feature evidence; use not_applicable here.
+        self.answer["checks"][4]["status"]="not_applicable"
+        for style in ("chat_completions","responses"):
+            self.cfg.data["model"]["api_style"]=style
+            checks=self.review()
+            self.assertTrue(all(c["status"] in {"pass","not_applicable"} for c in checks))
+            path,payload=self.requests[-1]
+            self.assertEqual(path,"/v1/chat/completions" if style=="chat_completions" else "/v1/responses")
+            self.assertNotIn("tools",payload)
+            self.assertNotIn("previous_response_id",payload)
+            text=json.dumps(payload)
+            self.assertNotIn("me@example.com",text)
+            self.assertNotIn("secret123",text)
+
+    def test_uncovered_comments_forged_citations_and_invalid_json_cannot_pass(self):
+        self.answer["coverage"]["comment_ids"]=[]
+        self.assertTrue(all(c["status"]=="pending" for c in self.review()))
+        self.answer["coverage"]["comment_ids"]=["20"]
+        self.answer["checks"][0]["evidence_refs"]=["comment:nonexistent"]
+        self.assertEqual(self.review()[0]["status"],"pending")
+        self.answer="not a result object"
+        self.assertTrue(all(c["status"]=="pending" for c in self.review()))
+
+    def test_budget_does_not_silently_truncate_or_make_request(self):
+        self.cfg.data["model"]["max_input_chars"]=30
+        checks=self.review()
+        self.assertTrue(all(c["status"]=="pending" for c in checks))
+        self.assertEqual(self.requests,[])
+
+    def test_feature_failure_requires_known_feature_details(self):
+        feature=next(c for c in self.answer["checks"] if c["rule_id"]=="submission.feature")
+        feature.update(status="fail",reason="功能归属存在但未关联",evidence_refs=["body","feature:99"])
+        features={"items":[{"id":99,"name":"Synthetic feature"}],"details":[],"status":"complete"}
+        client=ModelClient(self.cfg,self.http)
+        checks=client.review(self.record,{},features)
+        result=next(c for c in checks if c["rule_id"]=="submission.feature")
+        self.assertEqual(result["status"],"pending")
+        self.assertEqual(result["requested_feature_ids"],[99])
+        features["details"]=[{"id":99,"name":"Synthetic feature","description":"Applicable feature evidence"}]
+        result=next(c for c in client.review(self.record,{},features) if c["rule_id"]=="submission.feature")
+        self.assertEqual(result["status"],"fail")
+
+if __name__=="__main__":unittest.main()
