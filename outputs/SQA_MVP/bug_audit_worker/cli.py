@@ -3,7 +3,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from .config import ConfigError, doctor, load_config
+from .config import ConfigError, doctor, load_config, load_env_files
 
 
 def main(argv=None):
@@ -15,6 +15,7 @@ def main(argv=None):
         sub = commands.add_parser(name)
         sub.add_argument("--config", default=str(Path(__file__).parent / "config.example.toml"))
         sub.add_argument("--live", action="store_true")
+        sub.add_argument("--env-file", action="append", default=[], help="仅 --live：显式加载凭据环境文件，可多次指定；不自动搜索")
         if name in {"run", "resume"}: sub.add_argument("--apply", action="store_true")
         if name == "run": sub.add_argument("--from-run", type=int, help="保留只读计划窗口；创建独立 apply 并重新取证审计")
         if name in {"resume", "reconcile"}: sub.add_argument("--run-id", type=int, required=True)
@@ -30,6 +31,10 @@ def main(argv=None):
             if args.command in {"run", "resume"} and not args.live:
                 raise ConfigError("run/resume 必须显式提供 --live；演示请使用 demo")
             cfg = load_config(args.config)
+            if args.env_file:
+                if not args.live: raise ConfigError("--env-file 仅配合 --live 使用；离线命令不读取凭据")
+                names={cfg.data[section][key] for section,key in (("tp","token_env"),("model","key_env"),("feishu","secret_env"))}
+                load_env_files(args.env_file,names)
             health = doctor(cfg, online=args.live)
             if health["status"] != "ready": result = {**health, "exit_code": 2}
             elif args.command == "doctor":

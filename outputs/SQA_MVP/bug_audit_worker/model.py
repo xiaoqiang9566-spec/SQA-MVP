@@ -43,7 +43,7 @@ def validate_review(response, item, features, diagnostics=None):
         return pending(item,"模型检查项缺失或重复")
     if {r.get("rule_id") for r in results}!=set(required):return pending(item,"模型检查项与规则版本不一致")
     known_features={str(f["id"]) for f in features.get("items",[])}|{str(f["id"]) for f in features.get("details",[])}
-    detailed={str(f["id"]) for f in features.get("details",[]) if isinstance(f.get("description"),str)}
+    detailed={str(f["id"]) for f in features.get("details",[]) if isinstance(f.get("description"),str) and redact(f["description"]).strip()}
     known={"body","snapshot","comments"}|{"comment:"+c for c in expected_comments}|{"field:"+f for f in expected_fields}|{"feature:"+f for f in known_features}
     by_id={r["rule_id"]:r for r in results};output=[]
     if diagnostics is not None: diagnostics["valid"] = True
@@ -70,11 +70,11 @@ def validate_review(response, item, features, diagnostics=None):
         if item.get("evidence",{}).get("comments")!="complete" or item.get("evidence",{}).get("description")!="complete":
             output.append(check(rid,"pending","正文或评论证据不完整"));continue
         validated=check(rid,status,reason,refs)
-        if rid=="submission.feature" and status in {"pass","fail"}:
+        if rid=="submission.feature" and status in {"pass","fail","pending"}:
             candidates=[ref.split(":",1)[1] for ref in refs if ref.startswith("feature:")]
             if features.get("status")!="complete":
                 validated=check(rid,"pending","Feature 候选范围未完整核实")
-            elif not candidates:
+            elif not candidates and status!="pending":
                 validated=check(rid,"pending","Feature 适用性缺少实际候选证据")
             elif any(value not in detailed for value in candidates):
                 validated=check(rid,"pending","Feature 候选细节未核实",refs)
@@ -103,6 +103,13 @@ class ModelClient:
 
     def review(self,item,facts,features):
         self.last_validation = {"valid": False}
+        # 已关联 Feature 只核对该实体的明确描述，不要求重新搜索整个项目。
+        if item.get("feature_id"):
+            linked = [f for f in features.get("details", []) if str(f.get("id")) == str(item["feature_id"])
+                      and f.get("projectId") == self.config.data["scope"]["project_id"]
+                      and isinstance(f.get("description"), str) and redact(f["description"]).strip()]
+            if len(linked) == 1:
+                features = {"items": [{"id": linked[0]["id"], "name": linked[0].get("name", "")}], "details": linked, "status": "complete"}
         cfg=self.config.data["model"]
         payload={"rule_version":RULE_VERSION,"required_checks":semantic_rules(item),"body":redact(item.get("body")),
                  "snapshot":{k:redact(v) for k,v in item.get("snapshot",{}).items()},"fields":submitted_fields(item),
@@ -112,7 +119,21 @@ class ModelClient:
                              "details":[{"id":f["id"],"name":redact(f.get("name")),"description":redact(f.get("description"))} for f in features.get("details",[])],"status":features.get("status")}}
         root=Path(__file__).parent
         instructions=(root/"prompts"/"semantic-review.md").read_text(encoding="utf-8")+"\n"+(root/"rules"/(RULE_VERSION+".md")).read_text(encoding="utf-8")
+        feature_issue = None
+        validation_features = features
+        if "submission.feature" not in payload["required_checks"]:
+            payload["features"] = {"items":[],"details":[],"status":"not_requested"}
+            validation_features = payload["features"]
+        elif features.get("status") != "complete":
+            feature_issue = "Feature 候选范围未完整获取"
+            payload["features"] = {"items":[],"details":[],"status":"partial"}
+            validation_features = payload["features"]
         user=json.dumps(payload,ensure_ascii=False,allow_nan=False)
+        if len(user)+len(instructions)>cfg["max_input_chars"] and "submission.feature" in payload["required_checks"]:
+            feature_issue = "Feature 索引超出上下文预算，未据此判断适用性"
+            payload["features"] = {"items":[],"details":[],"status":"partial"}
+            validation_features = payload["features"]
+            user=json.dumps(payload,ensure_ascii=False,allow_nan=False)
         if len(user)+len(instructions)>cfg["max_input_chars"]:return pending(item,"上下文预算不足，未截断任何评论")
         if self.calls>=self.config.data["limits"]["max_model_calls"]:return pending(item,"模型调用预算已用完")
         messages=[{"role":"system","content":instructions},{"role":"user","content":user}]
@@ -138,7 +159,10 @@ class ModelClient:
                 content=[c for o in outputs if o.get("type")=="message" for c in o.get("content",[])]
                 if any(c.get("type")!="output_text" for c in content):return pending(item,"模型拒绝或输出类型无效")
                 text="".join(c["text"] for c in content)
-            return validate_review(json.loads(text),item,features,self.last_validation)
+            checks = validate_review(json.loads(text),item,validation_features,self.last_validation)
+            if feature_issue:
+                checks = [check(c["rule_id"],"pending",feature_issue) if c["rule_id"]=="submission.feature" else c for c in checks]
+            return checks
         except (TransportError,ValueError,KeyError,IndexError,TypeError):
             return pending(item,"公司模型调用或响应校验失败")
 

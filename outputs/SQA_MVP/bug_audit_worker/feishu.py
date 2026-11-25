@@ -115,6 +115,7 @@ class FeishuClient:
         if intent["status"]=="verified":return intent
         if intent["status"]=="failed" and retry_failed and intent["receipt"].get("safe_retry"):
             journal.retry_failed(key);intent=journal.prepare(run_id,key,intent["kind"],digest(payload),details)
+        if intent["status"]=="failed":return intent
         mid=intent["receipt"].get("message_id")
         if intent["status"]=="prepared":
             journal.inflight(key)

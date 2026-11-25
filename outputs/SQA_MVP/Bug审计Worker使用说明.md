@@ -44,6 +44,14 @@ structured_mode = "schema"
 
 环境变量默认为 `BUG_AUDIT_TP_TOKEN`、`BUG_AUDIT_MODEL_KEY`、`BUG_AUDIT_FEISHU_SECRET`。使用部署机的环境或密钥管理机制注入；不要将值放到命令行、TOML、聊天或 Git 中。桌面终端中设置的环境不会自动传给操作系统调度服务，需要在调度运行账号的启动环境中配置。
 
+也可显式提供 UTF-8 环境文件，支持 `NAME=value`、单/双引号及 `export NAME=value`。CLI 只加载 TOML 引用的凭据变量，不执行 shell、不展开变量、不改变代理或系统路径；默认不搜索任何 `.env`。可多次指定，后一个文件覆盖前一个文件的同名值。文件解析全部成功后才更新本次进程环境，错误不会回显密钥值。
+
+```powershell
+python outputs/SQA_MVP/bug_audit_worker_cli.py doctor --config /部署配置/worker.toml --env-file /部署配置/worker.env --live
+```
+
+若已有 TP 文件使用 `TP_ACCESS_TOKEN`，将 `tp.token_env` 填为这个变量名即可；模型/飞书可另放一份专用文件，再追加一个 `--env-file`。`*_env` 字段填写变量名，密钥值写在启动环境或环境文件中。`--env-file` 仅配合 `--live` 使用，离线命令不读取凭据；参数相对路径按启动 cwd 解析，调度建议使用绝对路径。
+
 `structured_mode="json"` 仅用于已明确不支持服务端 schema 的网关，仍保留本地严格验证；程序不会自动换协议或公开模型服务。
 
 ## 自检与只读分析
@@ -58,7 +66,13 @@ python outputs/SQA_MVP/bug_audit_worker_cli.py run --config work/bug-audit-worke
 
 在线 run 默认为 `dry_run`：按北京时间当天 00:00（含）至首次运行冻结时间（不含）采集与审计，生成台账和计划，不回填 TP、不发飞书。模型超时、拒绝、引用伪造、评论未全覆盖、输入或调用预算耗尽等情况保留 pending。原值/拟值/逐字段 ready 和阻塞原因可在 Web 检查。
 
+Feature 索引过大或不完整时，该项保留 pending，其他语义检查继续覆盖全部正文和评论。旧单不提交无关 Feature 索引；已关联 Feature 在项目归属和非空描述均核实后，仅审查该实体。未关联 Feature 的完整目录必须适配部署模型的输入预算；不能用截断后的候选目录声称该项通过。逐项规则结论和证据引用保存在私有检查点供复核。
+
+模型引用已知 Feature 候选但因缺少描述判为 pending 时，Worker 最多补取一次候选描述并复审；没有明确引用、描述为空或仍无法确认时继续 pending。仅影响文字审计的分类细化、已关联 Feature 的适用性、状态一致性，不连带阻塞没有对应下拉选项的字段；文字审计仍保留全部适用检查，不能因此写成“无异常”。
+
 同一 profile/模式/日期/业务范围/规则复用同一 run_id 和首次截止时间，不因重跑扩大窗口。修改配置、规则或模型后不能强行恢复原记录。`report_directory` 指向该次运行的“报告.md”和 UTF-8 BOM CSV；checkpoint 及其哈希是恢复依据，不能手工编辑。
+
+LF/CRLF 不改变规则和提示词身份，旧换行哈希只在内容及配置完全相同时兼容，保留原 run_id/outbox。实际规则变化时，已有当天 apply 只能恢复原记录，新版本执行从下一个受控生产日期开始；不会因同 profile 新规则再次发群。
 
 ## 授权执行与旧任务切换
 
@@ -127,6 +141,8 @@ Windows 任务计划程序中，将触发器时区与北京时间对齐；程序
 ```text
 -NoProfile -File "D:\部署目录\SQA-MVP\outputs\SQA_MVP\bug_audit_worker\schedule\run-worker.ps1" -ConfigPath "D:\部署配置\worker.toml" -Python "D:\部署目录\SQA-MVP\.venv\Scripts\python.exe" -Mode apply
 ```
+
+使用环境文件时，也可将任务程序直接设为部署虚拟环境的 Python，参数用官方 CLI 的 `run --config ... --env-file ... --live --apply`；无需将密钥值写入任务参数。
 
 POSIX 支持 `CRON_TZ` 的 cron 可配置如下；不支持该变量的实现需在调度器显式配置 Asia/Shanghai，不能直接使用主机默认时区：
 

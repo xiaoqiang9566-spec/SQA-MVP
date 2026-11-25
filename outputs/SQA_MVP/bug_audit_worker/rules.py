@@ -24,7 +24,8 @@ LABELS = {"flow.first_response":"流转超时", "flow.relations":"关联关系�
 
 
 def rules_digest():
-    return hashlib.sha256((Path(__file__).parent / "rules" / (RULE_VERSION + ".md")).read_bytes()).hexdigest()
+    text = (Path(__file__).parent / "rules" / (RULE_VERSION + ".md")).read_text(encoding="utf-8-sig")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def old_bug(item):
@@ -146,15 +147,19 @@ def deterministic_checks(item, facts):
 def assemble_findings(item, checks, options):
     by_id={c["rule_id"]:c for c in checks}
     old=old_bug(item)
-    testing=list(SUBMISSION)+["submission.category","submission.reg","flow.first_response"] if old is not True else []
-    development=list(FLOW)+["flow.relations","flow.comment_presence","flow.keyword_presence"]
+    state=item.get("snapshot",{}).get("state","")
+    testing=[rid for rid in SUBMISSION if rid!="submission.category_detail" and not (rid=="submission.feature" and item.get("feature_id"))]+["submission.category","submission.reg","flow.first_response"] if old is not True else []
+    development=["flow.relations","flow.comment_presence","flow.keyword_presence"]
+    if state in {"Invalid","Duplicate","Wont fix","Later"}:development.append("flow.explanation")
+    if state in {"Invalid","Reproduce","Needs info"}:development.append("flow.keywords")
     if old is True:
         for rid in SUBMISSION: by_id[rid]=check(rid,"not_applicable","旧单提单豁免")
-    required=set(testing+development+["flow.first_response"])
+    # 文字专属检查继续参与质量结论，不能连带阻塞没有对应选项的多选字段。
+    required=set(testing+development+["flow.first_response"]+list(FLOW))
+    if old is not True:required.update(SUBMISSION)
     for rid in required:
         by_id.setdefault(rid,check(rid,"pending","该项语义审计尚未完成"))
     findings=[]
-    state=item.get("snapshot",{}).get("state","")
     for name,ids in ((FIELDS[0],testing),(FIELDS[1],development)):
         chosen=[];pending=[]
         if name==FIELDS[0] and old is True: chosen=["No need"]

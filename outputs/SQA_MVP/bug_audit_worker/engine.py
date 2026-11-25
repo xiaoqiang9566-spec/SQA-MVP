@@ -36,7 +36,13 @@ class Worker:
         for section in ("tp", "model", "feishu"): normalized[section]["base_url"] = canonical_url(normalized[section]["base_url"])
         self.scope_hash = digest({"origin": normalized["tp"]["base_url"], "project": scope["project_id"], "teams": sorted(scope["team_ids"])})
         self.config_hash = digest({"config": normalized, "rules": rules_digest(),
-                                  "prompt": hashlib.sha256((Path(__file__).parent / "prompts/semantic-review.md").read_bytes()).hexdigest()})
+                                  "prompt": hashlib.sha256((Path(__file__).parent / "prompts/semantic-review.md").read_text(encoding="utf-8-sig").encode("utf-8")).hexdigest()})
+        # 只兼容内容完全相同的旧 LF/CRLF 哈希；实际文字或配置改变仍拒绝。
+        rule_text = (Path(__file__).parent / "rules" / (RULE_VERSION + ".md")).read_text(encoding="utf-8-sig")
+        prompt_text = (Path(__file__).parent / "prompts/semantic-review.md").read_text(encoding="utf-8-sig")
+        rule_hashes = {hashlib.sha256(t.encode("utf-8")).hexdigest() for t in (rule_text, rule_text.replace("\n", "\r\n"))}
+        prompt_hashes = {hashlib.sha256(t.encode("utf-8")).hexdigest() for t in (prompt_text, prompt_text.replace("\n", "\r\n"))}
+        self.equivalent_config_hashes = {self.config_hash} | {digest({"config": normalized, "rules": r, "prompt": p}) for r in rule_hashes for p in prompt_hashes}
 
     def _apply_gate(self, window, run_id=None):
         cfg = self.config.data["worker"]
@@ -69,7 +75,7 @@ class Worker:
                     continue
                 if not scope.get("scope_hash") and scope.get("project") not in (None, "", self.config.data["scope"]["project_name"]): continue
                 if row["mode"] == "apply":
-                    require(row["profile"] == self.config.profile, "相同范围当天已有其他 profile 的 apply，禁止重复执行")
+                    raise ConfigError("相同范围当天已有 apply，仅可恢复原运行；禁止以新 profile 或规则再次执行")
 
     def _save(self, run_id, mode, window, state, stage):
         # 内容寻址：文件已落地但 DB 更新前中断时，旧检查点仍完整可恢复。
@@ -94,11 +100,16 @@ class Worker:
             temporary.replace(path)
         checkpoint = {"path": path.relative_to(self.config.runs_dir).as_posix(), "sha256": sha,
                       "model_calls": state.get("model_calls", 0)}
-        self.journal.save_job(run_id, self.config.profile, mode, window, self.config_hash, stage, checkpoint)
+        stored_hash = self.config_hash
+        try: previous = self.journal.job(run_id)
+        except JournalError: previous = None
+        if previous and previous["config_hash"] in self.equivalent_config_hashes and previous["profile"] == self.config.profile:
+            stored_hash = previous["config_hash"]
+        self.journal.save_job(run_id, self.config.profile, mode, window, stored_hash, stage, checkpoint)
 
     def _load(self, run_id):
         job = self.journal.job(run_id)
-        if job["config_hash"] != self.config_hash or job["profile"] != self.config.profile:
+        if job["config_hash"] not in self.equivalent_config_hashes or job["profile"] != self.config.profile:
             raise JournalError("恢复配置、规则或模型已变化，不能覆盖原执行记录")
         path = (self.config.runs_dir / job["checkpoint"]["path"]).resolve()
         if not path.is_relative_to(self.config.runs_dir.resolve()): raise JournalError("检查点路径超出运行目录")
@@ -126,8 +137,21 @@ class Worker:
         require(start.date() == end.date() and start < end and start.time().isoformat() == "00:00:00", "窗口须从同一北京时间日期零点开始")
         window = {"start": start.isoformat(), "end": end.isoformat()}
         with self.journal.lock(self.scope_hash):
-            if mode == "apply": self._apply_gate(window)
             key = "worker:" + self.config.profile + ":" + mode + ":" + start.date().isoformat() + ":" + self.scope_hash[:24] + ":" + rules_digest()[:24]
+            with self.store.connection() as db:
+                matched = db.execute("SELECT id FROM bug_audit_runs WHERE run_key=?", (key,)).fetchone()
+                if matched is None:
+                    aliases = db.execute("""SELECT r.id,r.scope_json,j.config_hash FROM bug_audit_runs r
+                        JOIN bug_audit_worker_jobs j ON j.run_id=r.id WHERE j.profile=? AND j.mode=?
+                        AND r.window_start=? AND r.rule_version=?""", (self.config.profile,mode,window["start"],RULE_VERSION)).fetchall()
+                    aliases = [row for row in aliases if row["config_hash"] in self.equivalent_config_hashes and json.loads(row["scope_json"]).get("scope_hash") == self.scope_hash]
+                    require(len(aliases) <= 1, "同日存在多条等价运行，需先人工对账")
+                    matched = aliases[0] if aliases else None
+            if mode == "apply": self._apply_gate(window, matched["id"] if matched else None)
+            if matched:
+                try: self.journal.job(matched["id"])
+                except JournalError: pass
+                else: return self._continue(matched["id"])
             scope = self.config.data["scope"]
             run = self.audit.begin_run(key, window, {"project": scope["project_name"], "teams": scope["team_names"], "scope_hash": self.scope_hash}, RULE_VERSION)
             with self.store.connection() as db:
@@ -170,8 +194,9 @@ class Worker:
                 state["model_calls"] += 1; save("audit")
                 checks = self.model.review(item, facts, features)
                 item["review_features"] = details
-            fields = assemble_findings(item, deterministic_checks(item, facts) + checks, bundle["options"])
-            state["findings"].append({"bug_id": item["bug_id"], "fields": fields})
+            all_checks = deterministic_checks(item, facts) + checks
+            fields = assemble_findings(item, all_checks, bundle["options"])
+            state["findings"].append({"bug_id": item["bug_id"], "fields": fields, "checks": all_checks})
             save("audit")
         findings = json.loads(encoded({"schema_version": 1, "items": state["findings"]}))
         self.audit.record_findings(run_id, "worker-findings:" + digest(findings)[:32], findings)
@@ -220,7 +245,8 @@ class Worker:
         run = self.audit.get_run(run_id)
         job = self.journal.job(run_id)
         fields = [f for item in run["items"] for f in item["fields"]]
-        planned = run["collection_status"] == "complete" and all(f["ready"] for f in fields)
+        planned = (run["collection_status"] == "complete" and run["audit_status"] == "complete"
+                   and len(fields) == 3 * len(run["items"]) and all(f["ready"] for f in fields) and bool(state.get("report")))
         success = run["status"] == "complete" if job["mode"] == "apply" else planned
         if extra_issues: success = False
         return {"run_id": run_id, "profile": job["profile"], "mode": job["mode"], "window": job["window"],

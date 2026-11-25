@@ -1,5 +1,6 @@
 """配置仅引用凭据环境变量，不读取个人工具目录。"""
 import copy
+import json
 import os
 import re
 import sys
@@ -22,6 +23,43 @@ def canonical_url(value):
     if port and not (parsed.scheme == "https" and port == 443 or parsed.scheme == "http" and port == 80):
         host += ":" + str(port)
     return urlunsplit((parsed.scheme.lower(), host, parsed.path.rstrip("/"), "", ""))
+
+
+def load_env_files(paths, names):
+    """仅显式文件、仅所需变量，原子载入当前进程；不执行 shell 或变量展开。"""
+    require(len(paths) <= 5, "启动环境文件不能超过五份")
+    reserved = {"PATH","HOME","USERPROFILE","CODEX_HOME","PYTHONPATH","PYTHONHOME","HTTP_PROXY","HTTPS_PROXY","ALL_PROXY","NO_PROXY","SYSTEMROOT","WINDIR","COMSPEC","TEMP","TMP","PATHEXT"}
+    require(not {name.upper() for name in names} & reserved, "凭据不能复用系统环境变量")
+    updates = {}
+    for path in paths:
+        try:
+            with Path(path).open("rb") as handle: raw = handle.read(1024 * 1024 + 1)
+            require(len(raw) <= 1024 * 1024, "启动环境文件过大")
+            lines = raw.decode("utf-8-sig").splitlines()
+        except (OSError, UnicodeError):
+            raise ConfigError("启动环境文件无法读取或不是 UTF-8") from None
+        seen = set()
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"): continue
+            match = re.fullmatch(r"(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)", line)
+            require(match is not None, "启动环境文件须使用 NAME=value 格式")
+            key, value = match[1], match[2]
+            if key not in names: continue
+            require(key not in seen, "同一启动环境文件存在重复的凭据变量")
+            seen.add(key)
+            if value.startswith(("'", '"')):
+                quoted = re.match(r"'(?:[^']*)'" if value[0] == "'" else r'"(?:[^"\\]|\\.)*"', value)
+                require(quoted is not None, "启动环境文件的引号不完整")
+                trailing = value[quoted.end():].strip()
+                require(not trailing or trailing.startswith("#"), "启动环境文件的引号后存在无效内容")
+                try: value = quoted[0][1:-1] if value[0] == "'" else json.loads(quoted[0])
+                except ValueError: raise ConfigError("启动环境文件的转义无效") from None
+            else:
+                value = re.split(r"\s+#", value, maxsplit=1)[0].rstrip()
+            require(len(value) <= 16384 and not any(c in value for c in "\r\n\x00"), "凭据值长度超限或包含控制字符")
+            updates[key] = value
+    os.environ.update(updates)
 
 
 def require(condition, message):

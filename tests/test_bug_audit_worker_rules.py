@@ -20,6 +20,37 @@ def semantic_passes(record):
     return [{"rule_id":rid,"status":"pass","reason":"证据齐全","evidence_refs":["body"]} for rid in semantic_rules(record)]
 
 class RuleTests(unittest.TestCase):
+    def test_text_only_pending_does_not_block_dropdown_fields(self):
+        record=item(severity="Major")
+        checks=semantic_passes(record)+deterministic_checks(record,build_facts(record,{"end":"2026-11-24T19:30:00+08:00"}))
+        for check in checks:
+            if check["rule_id"] in {"submission.category_detail","flow.state_consistency"}:
+                check.update(status="pending",reason="仅文字审计仍待确认")
+        fields={f["name"]:f for f in assemble_findings(record,checks,OPTIONS)}
+        self.assertTrue(fields[FIELDS[0]]["ready"])
+        self.assertTrue(fields[FIELDS[1]]["ready"])
+        self.assertFalse(fields[FIELDS[2]]["ready"])
+
+    def test_linked_feature_matching_pending_only_blocks_text(self):
+        record=item(severity="Major");record["feature_id"]=99
+        checks=semantic_passes(record)+deterministic_checks(record,build_facts(record,{"end":"2026-11-24T19:30:00+08:00"}))
+        next(c for c in checks if c["rule_id"]=="submission.feature").update(status="pending",reason="已关联但适用性待确认")
+        fields={f["name"]:f for f in assemble_findings(record,checks,OPTIONS)}
+        self.assertTrue(fields[FIELDS[0]]["ready"])
+        self.assertFalse(fields[FIELDS[2]]["ready"])
+        record["feature_id"]=None
+        fields={f["name"]:f for f in assemble_findings(record,checks,OPTIONS)}
+        self.assertFalse(fields[FIELDS[0]]["ready"])
+
+    def test_reproduce_explanation_pending_keeps_defined_development_checks(self):
+        record=item(severity="Major");record["snapshot"]["state"]="Reproduce"
+        record["lifecycle"][-1]["stateName"]="Reproduce"
+        record["comments"]=[{"id":"20","text":"retest navigation","at":"2026-11-24T12:00:00+08:00"}]
+        checks=semantic_passes(record)+deterministic_checks(record,build_facts(record,{"end":"2026-11-24T19:30:00+08:00"}))
+        next(c for c in checks if c["rule_id"]=="flow.explanation").update(status="pending",reason="说明是否充分待确认")
+        fields={f["name"]:f for f in assemble_findings(record,checks,OPTIONS)}
+        self.assertEqual(fields[FIELDS[1]]["proposed_value"],"OK")
+        self.assertFalse(fields[FIELDS[2]]["ready"])
     def test_weekend_and_exact_response_threshold(self):
         self.assertEqual(working_hours("2026-11-20T00:00:00+08:00","2026-11-24T00:00:00+08:00"),48)
         record=item("2026-11-20T00:00:00+08:00","Blocking")
@@ -39,6 +70,9 @@ class RuleTests(unittest.TestCase):
 
     def test_old_testing_no_need_survives_other_pending_checks(self):
         record=item("2025-12-31T23:59:59+08:00")
+        # Invalid 的说明/关键词仍需语义审计，不能以旧单豁免跳过。
+        record["snapshot"]["state"]="Invalid"
+        record["lifecycle"][-1]["stateName"]="Invalid"
         checks=deterministic_checks(record,build_facts(record,{"end":"2026-11-24T12:00:00+08:00"}))
         fields={f["name"]:f for f in assemble_findings(record,checks,OPTIONS)}
         self.assertTrue(fields[FIELDS[0]]["ready"])

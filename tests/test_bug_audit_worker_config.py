@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "outputs" / "SQA_MVP"))
-from bug_audit_worker.config import ConfigError, doctor, load_config, canonical_url
+from bug_audit_worker.config import ConfigError, doctor, load_config, canonical_url, load_env_files
 
 EXAMPLE = '''
 [worker]
@@ -40,6 +40,23 @@ mentions = [{open_id="configured-user", name="Reviewer"}]
 '''
 
 class ConfigTests(unittest.TestCase):
+    def test_explicit_env_files_only_load_selected_credentials_without_shell(self):
+        first=self.path.parent/"first.env";second=self.path.parent/"第二份.env"
+        first.write_text('TEST_KEY="first"\nPATH=unsafe\n',encoding="utf-8")
+        second.write_text("export TEST_KEY='$(do-not-execute)' # 注释\n",encoding="utf-8")
+        with patch.dict(os.environ,{"PATH":"preserved"}):
+            load_env_files([first,second],{"TEST_KEY"})
+            self.assertEqual(os.environ["TEST_KEY"],"$(do-not-execute)")
+            self.assertEqual(os.environ["PATH"],"preserved")
+
+    def test_env_parse_failure_is_atomic_and_does_not_echo_values(self):
+        path=self.path.parent/"invalid.env"
+        path.write_text('TEST_KEY=do-not-log-secret\nTEST_KEY=duplicate-secret\n',encoding="utf-8")
+        with patch.dict(os.environ,{"TEST_KEY":"original"}):
+            with self.assertRaises(ConfigError) as caught:load_env_files([path],{"TEST_KEY"})
+            self.assertNotIn("do-not-log-secret",str(caught.exception))
+            self.assertEqual(os.environ["TEST_KEY"],"original")
+
     def test_equivalent_origin_and_default_port_normalization_keeps_path_case(self):
         self.assertEqual(canonical_url("https://TP.EXAMPLE.invalid:443/"), "https://tp.example.invalid")
         self.assertEqual(canonical_url("http://LOCALHOST:80/api/V2/"), "http://localhost/api/V2")

@@ -62,6 +62,16 @@ class FeishuTests(unittest.TestCase):
         self.remote.fail_file_send=False
         self.assertEqual(self.client.notify(self.run["id"],self.report,self.j,retry_failed=True)["status"],"verified")
         self.assertEqual(self.remote.counts[("POST","/open-apis/im/v1/messages")],3)
+
+    def test_plain_replay_keeps_certain_failure_retryable(self):
+        self.remote.fail_file_send=True
+        self.client.notify(self.run["id"],self.report,self.j)
+        self.client.notify(self.run["id"],self.report,self.j)
+        intent=next(i for i in self.j.intents(self.run["id"]) if i["operation_key"].endswith(":file"))
+        self.assertEqual(intent["status"],"failed")
+        self.assertTrue(intent["receipt"]["safe_retry"])
+        self.remote.fail_file_send=False
+        self.assertEqual(self.client.notify(self.run["id"],self.report,self.j,retry_failed=True)["status"],"verified")
         self.assertEqual(self.remote.counts[("POST","/open-apis/im/v1/files")],1)
         with self.store.connection() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM bug_audit_worker_intent_events WHERE status='failed'").fetchone()[0],1)

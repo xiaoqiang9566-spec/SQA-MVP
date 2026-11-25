@@ -102,4 +102,52 @@ class ModelTests(unittest.TestCase):
         self.answer["coverage"]["comment_ids"] = ["forged"]
         self.assertEqual(ModelClient(self.cfg, self.http).probe()["status"], "blocked")
 
+    def test_large_or_partial_feature_index_only_blocks_feature_check(self):
+        for status in ("complete", "partial"):
+            with self.subTest(status=status):
+                features = {"items": [{"id":i+1,"name":"Navigation "*30} for i in range(1000)], "details":[], "status":status}
+                checks = ModelClient(self.cfg,self.http).review(self.record,{},features)
+                by_id = {c["rule_id"]:c for c in checks}
+                self.assertEqual(by_id["flow.state_consistency"]["status"], "pass")
+                self.assertEqual(by_id["submission.feature"]["status"], "pending")
+                sent = json.loads(self.requests[-1][1]["messages"][-1]["content"])
+                self.assertEqual([c["id"] for c in sent["comments"]], ["20"])
+                self.assertEqual(sent["features"]["items"], [])
+
+    def test_old_bug_does_not_send_unrelated_feature_index(self):
+        self.record["created_at"]="2025-01-01T00:00:00+08:00"
+        self.answer["checks"]=[c for c in self.answer["checks"] if c["rule_id"].startswith("flow.")]
+        features={"items":[{"id":i+1,"name":"unrelated "*30} for i in range(1000)],"details":[],"status":"complete"}
+        checks=ModelClient(self.cfg,self.http).review(self.record,{},features)
+        self.assertTrue(all(c["status"]=="pass" for c in checks))
+        self.assertEqual(len(self.requests),1)
+
+    def test_linked_feature_uses_verified_description_without_full_catalog(self):
+        self.record["feature_id"]=25
+        feature=next(c for c in self.answer["checks"] if c["rule_id"]=="submission.feature")
+        feature["evidence_refs"]=["body","feature:25"]
+        features={"items":[{"id":i+1,"name":"unrelated "*30} for i in range(1000)],
+                  "details":[{"id":25,"name":"Navigation","description":"Covers navigation reset","projectId":1}],"status":"partial"}
+        checks=ModelClient(self.cfg,self.http).review(self.record,{},features)
+        self.assertEqual(next(c for c in checks if c["rule_id"]=="submission.feature")["status"],"pass")
+        sent=json.loads(self.requests[-1][1]["messages"][-1]["content"])
+        self.assertEqual([f["id"] for f in sent["features"]["items"]],[25])
+        features["details"][0]["projectId"]=999
+        checks=ModelClient(self.cfg,self.http).review(self.record,{},features)
+        self.assertEqual(next(c for c in checks if c["rule_id"]=="submission.feature")["status"],"pending")
+
+    def test_empty_feature_description_cannot_prove_applicability(self):
+        feature=next(c for c in self.answer["checks"] if c["rule_id"]=="submission.feature")
+        feature.update(evidence_refs=["body","feature:25"])
+        features={"items":[{"id":25,"name":"Navigation"}],"details":[{"id":25,"name":"Navigation","description":"  "}],"status":"complete"}
+        checks=ModelClient(self.cfg,self.http).review(self.record,{},features)
+        self.assertEqual(next(c for c in checks if c["rule_id"]=="submission.feature")["status"],"pending")
+
+    def test_pending_feature_with_known_citation_requests_missing_description(self):
+        feature=next(c for c in self.answer["checks"] if c["rule_id"]=="submission.feature")
+        feature.update(status="pending",reason="需要候选描述才能判断",evidence_refs=["body","feature:99"])
+        checks=ModelClient(self.cfg,self.http).review(self.record,{}, {"items":[{"id":99,"name":"Tides"}],"details":[],"status":"complete"})
+        result=next(c for c in checks if c["rule_id"]=="submission.feature")
+        self.assertEqual(result["requested_feature_ids"],[99])
+
 if __name__=="__main__":unittest.main()

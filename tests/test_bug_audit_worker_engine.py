@@ -114,6 +114,78 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(resumed["exit_code"], 3)
         self.assertEqual(self.remote.counts[("POST", "/v1/responses")], 1)
 
+    def test_reconcile_during_audit_cannot_report_empty_fields_as_completed(self):
+        with patch.object(self.worker.model,"review",side_effect=RuntimeError("模拟审计阶段中断")):
+            with self.assertRaises(RuntimeError): self.worker.run("dry_run",WINDOW)
+        run_id=self.worker.audit.list_runs()[0]["id"]
+        result=self.worker.reconcile(run_id)
+        self.assertEqual(result["counts"]["bugs"],1)
+        self.assertEqual(result["counts"]["fields"],0)
+        self.assertEqual(result["exit_code"],3)
+        self.assertEqual(result["status"],"partial")
+
+    def test_checkpoint_retains_validated_rule_citations_for_review(self):
+        result=self.worker.run("dry_run",WINDOW)
+        job=self.worker.journal.job(result["run_id"])
+        state=json.loads((self.remote.config.runs_dir/job["checkpoint"]["path"]).read_text(encoding="utf-8"))
+        checks={c["rule_id"]:c for c in state["findings"][0]["checks"]}
+        self.assertEqual(checks["flow.state_consistency"]["evidence_refs"],["body"])
+        self.assertEqual(checks["flow.state_consistency"]["status"],"pass")
+
+    def test_line_endings_do_not_change_rule_or_execution_identity(self):
+        import bug_audit_worker.engine as engine_module
+        import bug_audit_worker.rules as rule_module
+        source=self.remote.root/"module-copy"
+        (source/"rules").mkdir(parents=True);(source/"prompts").mkdir()
+        real=Path(engine_module.__file__).parent
+        paths=[Path("rules/2026-11-10.md"),Path("prompts/semantic-review.md")]
+        for path in paths:(source/path).write_bytes((real/path).read_text(encoding="utf-8").replace("\r\n","\n").encode("utf-8"))
+        with patch.object(engine_module,"__file__",str(source/"engine.py")),patch.object(rule_module,"__file__",str(source/"rules.py")):
+            first_rule=rule_module.rules_digest();first=Worker(self.remote.config).config_hash
+            for path in paths:
+                text=(source/path).read_bytes().decode("utf-8")
+                (source/path).write_bytes(text.replace("\n","\r\n").encode("utf-8"))
+            self.assertEqual(rule_module.rules_digest(),first_rule)
+            self.assertEqual(Worker(self.remote.config).config_hash,first)
+
+    def test_legacy_crlf_identity_recovers_same_run_without_duplicate_delivery(self):
+        import hashlib
+        import bug_audit_worker.engine as engine_module
+        from bug_audit_worker.journal import digest
+        self.remote.fail_file_send=True
+        first=self.worker.run("apply",WINDOW)
+        source=Path(engine_module.__file__).parent
+        old_rule=hashlib.sha256((source/"rules/2026-11-10.md").read_text(encoding="utf-8").replace("\n","\r\n").encode()).hexdigest()
+        old_prompt=hashlib.sha256((source/"prompts/semantic-review.md").read_text(encoding="utf-8").replace("\n","\r\n").encode()).hexdigest()
+        old_hash=digest({"config":self.remote.config.data,"rules":old_rule,"prompt":old_prompt})
+        with self.worker.store.connection(True) as db:
+            row=db.execute("SELECT run_key FROM bug_audit_runs WHERE id=?",(first["run_id"],)).fetchone()
+            old_key=row[0].rsplit(":",1)[0]+":"+old_rule[:24]
+            db.execute("UPDATE bug_audit_runs SET run_key=? WHERE id=?",(old_key,first["run_id"]))
+            db.execute("UPDATE bug_audit_worker_jobs SET config_hash=? WHERE run_id=?",(old_hash,first["run_id"]))
+        self.remote.fail_file_send=False
+        resumed=Worker(self.remote.config).resume(first["run_id"])
+        self.assertEqual(resumed["run_id"],first["run_id"])
+        self.assertEqual(resumed["exit_code"],0,resumed)
+        self.assertEqual(self.remote.counts[("POST","/api/v1/Bugs/bulk")],1)
+        self.assertEqual(self.remote.counts[("POST","/open-apis/im/v1/messages")],3)
+        self.assertEqual(self.worker.journal.job(first["run_id"])["config_hash"],old_hash)
+        self.assertEqual(Worker(self.remote.config).run("apply",WINDOW)["run_id"],first["run_id"])
+        self.assertEqual(self.remote.counts[("POST","/open-apis/im/v1/messages")],3)
+
+    def test_same_day_changed_rules_cannot_create_second_apply_delivery(self):
+        import bug_audit_worker.engine as engine_module
+        import bug_audit_worker.rules as rule_module
+        self.worker.run("apply",WINDOW)
+        source=self.remote.root/"changed-module"
+        (source/"rules").mkdir(parents=True);(source/"prompts").mkdir()
+        real=Path(engine_module.__file__).parent
+        for relative in ("rules/2026-11-10.md","prompts/semantic-review.md"):
+            (source/relative).write_text((real/relative).read_text(encoding="utf-8")+"\n明确不同的规则内容\n",encoding="utf-8")
+        with patch.object(engine_module,"__file__",str(source/"engine.py")),patch.object(rule_module,"__file__",str(source/"rules.py")):
+            with self.assertRaises(ConfigError):Worker(self.remote.config).run("apply",WINDOW)
+        self.assertEqual(self.remote.counts[("POST","/open-apis/im/v1/messages")],2)
+
     def test_feature_lookup_rejects_unknown_or_cross_project_ids(self):
         from bug_audit_worker.tp import TPClient
         client = TPClient(self.remote.config)
@@ -177,7 +249,7 @@ class EngineTests(unittest.TestCase):
                 finally: self.remote.intercept = intercept
                 answer = json.loads(value["output"][0]["content"][0]["text"])
                 target = next(c for c in answer["checks"] if c["rule_id"] == "submission.feature")
-                target.update(status="fail", reason="Feature存在但未关联", evidence_refs=["body", "feature:25"])
+                target.update(status="pending" if calls==1 else "fail", reason="Feature存在但未关联", evidence_refs=["body", "feature:25"])
                 value["output"][0]["content"][0]["text"] = json.dumps(answer)
                 if calls == 2: self.remote.features[0]["description"] = "Unrelated music playback only"
                 return status, value
