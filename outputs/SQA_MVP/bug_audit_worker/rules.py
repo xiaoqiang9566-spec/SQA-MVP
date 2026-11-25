@@ -178,7 +178,17 @@ def assemble_findings(item, checks, options):
                          "ready":not pending,"reason":"；".join(dict.fromkeys(pending))[:1000]})
     applicable=[by_id[rid] for rid in sorted(required)]
     pending=[c["reason"] for c in applicable if c["status"]=="pending"]
-    issues=[LABELS.get(c["rule_id"],"信息缺失")+"（"+str(c["reason"])[:70]+"）" for c in applicable if c["status"]=="fail"]
+    short_details={"submission.firmware":"固件版本", "submission.reproducibility":"复现情况",
+                   "submission.app_platform":"Suunto App平台", "submission.app_version":"Suunto App版本",
+                   "submission.feature":"Feature关联", "submission.reg":"此前正常版本"}
+    issues=[]
+    for c in applicable:
+        if c["status"]!="fail":continue
+        rid=c["rule_id"]
+        # 分类为空已有确定性缺失结论，不将同一缺失再归成分类不一致。
+        if rid=="submission.category_detail" and by_id.get("submission.category",{}).get("status")=="fail":continue
+        detail=short_details.get(rid,str(c["reason"])[:70])
+        issues.append(LABELS.get(rid,"信息缺失")+"（"+detail+"）")
     findings.append({"name":FIELDS[2],"original_value":item.get("original",{}).get(FIELDS[2]),
                      "proposed_value":None if pending else "；".join(issues) or "无异常","ready":not pending,
                      "reason":"；".join(dict.fromkeys(pending))[:1000]})

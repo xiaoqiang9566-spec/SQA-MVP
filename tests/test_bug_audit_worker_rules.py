@@ -20,6 +20,22 @@ def semantic_passes(record):
     return [{"rule_id":rid,"status":"pass","reason":"证据齐全","evidence_refs":["body"]} for rid in semantic_rules(record)]
 
 class RuleTests(unittest.TestCase):
+    def test_missing_category_is_not_relabelled_as_inconsistency(self):
+        record=item(severity="Major");record["fields"]["Bug Category"]=""
+        checks=semantic_passes(record)+deterministic_checks(record,build_facts(record,{"end":"2026-11-24T19:30:00+08:00"}))
+        next(c for c in checks if c["rule_id"]=="submission.category_detail").update(status="fail",reason="信息缺失（Bug Category）：分类字段为空，应补充分类。")
+        fields={f["name"]:f for f in assemble_findings(record,checks,OPTIONS)}
+        self.assertEqual(fields[FIELDS[2]]["proposed_value"],"信息缺失（Bug Category 缺失）")
+        self.assertEqual(fields[FIELDS[0]]["proposed_value"],"Bug Category is missing")
+
+    def test_submission_issue_text_uses_short_detail_without_nested_analysis(self):
+        record=item(severity="Major")
+        checks=semantic_passes(record)+deterministic_checks(record,build_facts(record,{"end":"2026-11-24T19:30:00+08:00"}))
+        next(c for c in checks if c["rule_id"]=="submission.feature").update(status="fail",reason="信息缺失（Feature关联）：已核实该候选覆盖产品及用户功能，当前未关联。"*3)
+        fields={f["name"]:f for f in assemble_findings(record,checks,OPTIONS)}
+        self.assertEqual(fields[FIELDS[2]]["proposed_value"],"信息缺失（Feature关联）")
+        self.assertTrue(fields[FIELDS[2]]["ready"])
+
     def test_text_only_pending_does_not_block_dropdown_fields(self):
         record=item(severity="Major")
         checks=semantic_passes(record)+deterministic_checks(record,build_facts(record,{"end":"2026-11-24T19:30:00+08:00"}))
