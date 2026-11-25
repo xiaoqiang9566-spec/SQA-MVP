@@ -100,6 +100,8 @@ python outputs/SQA_MVP/bug_audit_worker_cli.py run --config work/bug-audit-worke
 
 TP 回填与飞书通知分别登记；通知失败不抹去已完成回填。摘要、上传和附件消息有独立持久意图，消息回读核对群、应用、正文、真实提及，附件下载后比对 SHA-256。
 
+消息回读中的附件 Key 可能与上传 Key 不同；程序使用已核验消息的实际资源 Key 下载，仍要求原文件名与字节哈希匹配。Key 变化不能通过重复发送解决。
+
 ## 中断恢复与每日对账
 
 ```powershell
@@ -113,6 +115,8 @@ python outputs/SQA_MVP/bug_audit_worker_cli.py reconcile --config work/bug-audit
 ```
 
 恢复核验配置、模式、窗口、文件哈希和意图，先回读未知结果，已核验副作用不重发。飞书明确拒绝的失败项可在显式 resume 中补发；摘要成功、附件失败时仅补失败部分。对账仅回读已有实体/消息和下载文件，不创建新副作用，也不重新调用业务审计模型。
+
+回填阶段结束并冻结报告后，resume 仅处理通知，不再重做 TP 写回。若字段因网络预检失败而尚未尝试，需单列待处理清单、重新取证后制定恢复计划；网络恢复或次日正常运行不能被当作这些历史项已自动补齐。保留旧计划和回执，禁止删除台账绕过同日防重。
 
 发送成功但响应丢失时，如果没有消息 ID，程序保留 unknown，即使已超过服务端 uuid 一小时去重窗口也不会盲发。人工找到消息后，可提供 JSON：
 
@@ -151,7 +155,7 @@ CRON_TZ=Asia/Shanghai
 30 19 * * * PYTHON=/opt/sqa/.venv/bin/python /bin/sh /opt/sqa/outputs/SQA_MVP/bug_audit_worker/schedule/run-worker.sh /etc/sqa/worker.toml apply
 ```
 
-本轮没有注册新调度、暂停旧任务或执行真实回填/发群。Windows 本机和模拟 HTTP 链路已验证；Linux/macOS × Python 3.11/3.13 已提供专属 CI 矩阵，需等待实际 CI 结果，不能视为已通过。
+仓库调度示例不自动注册任务。本机已在用户授权下完成首笔真实回填、新机器人通知和 Windows 任务切换，详细结果与部分完成项见[生产验收记录](../../docs/superpowers/validation/2026-11-25-bug-audit-production-acceptance.md)。Windows 本机和模拟 HTTP 链路已验证；Linux/macOS × Python 3.11/3.13 已提供专属 CI 矩阵，需等待实际 CI 结果，不能视为已通过。
 
 ## 验证边界
 

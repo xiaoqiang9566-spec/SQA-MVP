@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -30,6 +31,26 @@ class FeishuTests(unittest.TestCase):
         self.client.notify(self.run["id"],self.report,self.j)
         self.assertEqual(self.remote.counts[("POST","/open-apis/im/v1/messages")],2)
         self.assertEqual(self.remote.counts[("POST","/open-apis/im/v1/files")],1)
+
+    def test_message_scoped_file_key_uses_download_hash_without_resending(self):
+        self.client.notify(self.run["id"],self.report,self.j)
+        message=next(m for m in self.remote.messages.values() if m["msg_type"]=="file")
+        message["body"]["content"]=json.dumps({"file_key":"file_message_scoped","file_name":self.report["filename"]})
+        result=self.client.recover(self.run["id"],self.j)
+        self.assertEqual(result["status"],"verified")
+        path="/open-apis/im/v1/messages/"+message["message_id"]+"/resources/file_message_scoped"
+        self.assertEqual(self.remote.counts[("GET",path)],1)
+        self.assertEqual(self.remote.counts[("POST","/open-apis/im/v1/messages")],2)
+        self.assertEqual(self.remote.counts[("POST","/open-apis/im/v1/files")],1)
+
+    def test_message_scoped_file_key_still_requires_filename_and_exact_bytes(self):
+        self.client.notify(self.run["id"],self.report,self.j)
+        message=next(m for m in self.remote.messages.values() if m["msg_type"]=="file")
+        for filename,data in (("wrong.csv",self.report["csv_bytes"]),(self.report["filename"],b"different bytes")):
+            with self.subTest(filename=filename):
+                message["body"]["content"]=json.dumps({"file_key":"file_message_scoped","file_name":filename})
+                self.remote.csv=data
+                self.assertEqual(self.client.check_delivery(self.run["id"],self.j)["status"],"partial")
 
     def test_missing_membership_permission_blocks_notification_without_sending(self):
         self.remote.members_allowed=False

@@ -2,6 +2,8 @@
 
 范围：分支 `codex/bug-audit-worker`，从台账基线 `68a0479` 继续实施独立执行器，仅改 Bug 审计代码、页面局部、测试及专属部署资料。当前尚未进行生产切换。
 
+本页记录只读阶段的验收。用户随后授权真实执行，最新生产回填、通知及调度状态见[11 月 25 日生产验收](2026-11-25-bug-audit-production-acceptance.md)；不要将本页历史“未执行”描述视为当前状态。
+
 ## 已执行的验证
 
 - 使用 Windows Python 3.13 创建全新 venv，依照专属 requirements 安装 `tzdata==2026.6` 成功；未继承系统 site-packages。

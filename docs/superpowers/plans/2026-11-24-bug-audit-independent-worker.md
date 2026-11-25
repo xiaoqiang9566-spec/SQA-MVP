@@ -10,7 +10,7 @@
 
 **Spec:** [已批准设计](../specs/2026-11-24-bug-audit-independent-worker-design.md)
 
-**执行状态（2026-11-25）:** Tasks 1–10 的代码、离线验收及独立审查修复已完成，干净 venv 115/115 通过。正式在线 doctor 三项 ready；真实隔离只读链完成，今日同窗口复审 3 单/9 字段，7 ready、2 pending，未产生业务副作用；昨日旧日报 110 单/330 字段逐项对账差异 0。用户已授权改用当前“肖强的飞书助手”，AQS 目标不变。生产 apply、新机器人首发、人工语义金标、跨平台 CI 和调度切换仍待验收，详见 [验证记录](../validation/2026-11-24-bug-audit-independent-worker.md)。
+**执行状态（2026-11-25）:** Tasks 1–10 的实现、离线、独立审查修复及真实只读验证完成，最新干净 venv 119/119 通过。用户随后授权真实执行：首笔 TP 回填回读通过，新“肖强的飞书助手”摘要与 CSV 交付核验通过；旧 bug-2 已暂停，新 Windows 任务已启用，首次自动触发定于 11 月 26 日 19:30，手工触发复用原记录且未重复副作用。生产 run_id=2 的 30 字段中 1 verified、18 未尝试、11 pending，整单保持 partial；不是全量回填完成。人工语义金标、未完成字段恢复、自然定时触发及跨平台 CI 仍待验收。见[只读验证](../validation/2026-11-24-bug-audit-independent-worker.md)和[生产验收](../validation/2026-11-25-bug-audit-production-acceptance.md)。
 
 ## Global Constraints
 
@@ -149,8 +149,8 @@ HTTPClient.request(method,path,query=None,headers=None,body=None) 返回 Respons
 - [x] 运行 `py -3.13 -X utf8 -m unittest tests.test_bug_audit_worker_portability -v`，预期缺入口/资料时失败。
 - [x] 补全依赖/示例/运行说明、作用域和权限自检、未知状态恢复、两实例同数据目录及单活要求。CI 矩阵 Windows/Linux/macOS × Python 3.11/3.13，只运行 Bug 审计离线测试，不使用真实凭据；未执行的 CI 平台记为待验。
 - [x] 运行 `py -3.13 -X utf8 -m unittest discover -s tests -p "test_bug_audit*.py" -v`、Node 语法及差异检查；干净环境 install/doctor/demo/reconcile 全部通过后独立整分支审查，修复重要项。
-- [ ] 在线只读与 apply 验收需要部署参数：公司模型 base URL/api_style/model、TP Context/域名、机器人必要成员读取权限及各环境密钥。参数未提供时明确 online/apply 未验，不凭演示声称真实闭环完成。不得复制个人密钥凑验收。
-- [ ] 切换采用跨日：记录旧任务是否仍运行及回执，停止旧执行器后再启用新调度；本轮未获具体切换日期时只交付可审阅脚本，不改变现有每日任务。
+- [x] 部署参数已补齐，真实只读、首笔受控 TP 写入、新机器人摘要/CSV 和在线回执对账已验证；30 字段中的未完成项单独保留，不凭演示或首笔成功声称整单闭环。
+- [x] 用户明确授权继续真实执行和调度切换；核实今日无旧副作用并停止旧任务后，今日受控验收，新日 26 日 19:30 开始自动调度。已注册、启用并手工触发验证防重，自然定时触发待验。
 
 ## 自审及执行约定
 

@@ -98,12 +98,15 @@ class FeishuClient:
                 or message.get("sender",{}).get("id_type")!="app_id" or message.get("deleted") is not False
                 or message.get("msg_type")!=details["msg_type"]):raise FeishuError("message_identity_or_state")
         content=json.loads(message["body"]["content"])
-        if digest(content_value(content,message.get("mentions")))!=details["content_hash"]:raise FeishuError("message_content_mismatch")
         if details["msg_type"]=="post":
+            if digest(content_value(content,message.get("mentions")))!=details["content_hash"]:raise FeishuError("message_content_mismatch")
             if {m.get("id") for m in message.get("mentions",[])}!={m["open_id"] for m in self.cfg["mentions"]}:raise FeishuError("mentions_mismatch")
         else:
             if content.get("file_name",details["filename"])!=details["filename"]:raise FeishuError("attachment_name")
-            resource=self.http.request("GET","open-apis/im/v1/messages/"+message_id+"/resources/"+quote(details["file_key"],safe=""),query={"type":"file"},headers={"Authorization":"Bearer "+self.token()})
+            # 飞书回读可能返回消息作用域的资源 Key；以已核验消息的实际 Key 下载，仍严格比对原文件哈希。
+            resource_key=content.get("file_key")
+            if not isinstance(resource_key,str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,512}",resource_key):raise FeishuError("attachment_key")
+            resource=self.http.request("GET","open-apis/im/v1/messages/"+message_id+"/resources/"+quote(resource_key,safe=""),query={"type":"file"},headers={"Authorization":"Bearer "+self.token()})
             if hashlib.sha256(resource.body).hexdigest()!=details["file_sha256"]:raise FeishuError("attachment_hash_mismatch")
         return {"message_id":message_id,"target":self.cfg["chat_name"],"idempotency_key":details["uuid"],"summary_hash":details["summary_hash"]}
 
